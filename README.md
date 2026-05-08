@@ -201,10 +201,10 @@ Start the long-lived services. `gt up` boots Dolt, the daemon, the Deacon, the M
 gt up
 ```
 
-Verify the install.
+Verify the install. The `--fix` flag clears the warnings that `gt install` does not preempt.
 
 ```bash
-gt doctor
+gt doctor --fix
 ```
 
 #### Add a project
