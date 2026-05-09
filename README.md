@@ -120,19 +120,21 @@ Federated work coordination network linking Gas Towns through DoltHub. Rigs post
 
 ## Installation
 
+Choose one of the two setup paths below: install Gas Town on your host, or run it inside a Docker container.
+
 ### Prerequisites
 
-- **Go 1.25+** - [go.dev/dl](https://go.dev/dl/)
-- **Git 2.25+** - for worktree support
-- **Dolt 1.82.4+** - `brew install dolt` on macOS, or see [github.com/dolthub/dolt](https://github.com/dolthub/dolt)
-- **beads (bd) 0.55.4+** - installed by `brew install gastown`, or see [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
-- **sqlite3** - for convoy database queries (usually pre-installed on macOS/Linux)
-- **tmux 3.0+** - recommended for full experience
-- **Claude Code CLI** (default runtime) - [claude.ai/code](https://claude.ai/code)
-- **Codex CLI** (optional runtime) - [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli)
-- **GitHub Copilot CLI** (optional runtime) - [cli.github.com](https://cli.github.com) (requires Copilot seat)
+The tools below must be on your system before you start. The setup steps that follow install `gt`, `bd`, and `dolt` for you — you do not need to install those manually.
 
-### Setup (Docker-Compose below)
+| Tool | Version | Notes |
+|---|---|---|
+| Git | 2.25+ | Worktree support |
+| Go | 1.25+ | Required for the Linux and Windows paths and for macOS source builds. Not needed for `brew install gastown`. |
+| sqlite3 | any | Used by convoy database queries. Usually pre-installed on macOS and Linux. |
+| tmux | 3.0+ | Required for `gt up` and the tmux-backed roles (Mayor, Witnesses, Refineries, polecats). Optional only for minimal-mode workflows where you run runtime instances manually. |
+| Claude Code CLI | latest | Default runtime. See [Runtime Configuration](#runtime-configuration) for alternatives (Codex, Copilot, Gemini, Cursor). |
+
+### Local setup
 
 Install the prerequisites listed above, then install `gt` for your platform.
 
@@ -240,14 +242,14 @@ The Mayor coordinates work across rigs.
 gt mayor attach
 ```
 
-### Docker Compose
+### Docker Compose setup
 
 `docker-compose.yml` runs Gas Town inside a sandbox container. The container hosts an HQ at `/gt`, which Compose bind-mounts from `${FOLDER}` on the host. The entrypoint runs `gt install /gt --git` against that directory on first start, so `FOLDER` must point at an empty directory that you want to become the HQ.
 
 ```bash
 export GIT_USER="<your name>"
 export GIT_EMAIL="<your email>"
-export FOLDER="$HOME/gt-docker"   # any empty host directory
+export FOLDER="/path/to/empty/dir"   # any empty host directory
 export DASHBOARD_PORT=8080        # optional, host port for the dashboard
 
 mkdir -p "$FOLDER"
