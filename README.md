@@ -174,19 +174,14 @@ source ~/.bashrc
 
 #### Install gt on Windows
 
-Clone the repository and build `gt` from source.
+Install `gt` and `bd` with `go install`.
 
-```bash
-git clone https://github.com/steveyegge/gastown.git
-cd gastown
-go build -o gt.exe ./cmd/gt
-```
-
-Move `gt.exe` into a directory on your `PATH`, then install `bd` the same way.
-
-```bash
+```powershell
+go install github.com/steveyegge/gastown/cmd/gt@latest
 go install github.com/steveyegge/beads/cmd/bd@latest
 ```
+
+Both binaries land in `%USERPROFILE%\go\bin\`. Add that directory to your `PATH` if Go's installer did not already do so, and open a new shell for the change to take effect.
 
 #### Create your workspace
 
