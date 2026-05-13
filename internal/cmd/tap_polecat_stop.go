@@ -8,9 +8,16 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
+
+type polecatStopPendingWork struct {
+	Pending bool
+	Branch  string
+	Summary string
+}
 
 var tapPolecatStopCmd = &cobra.Command{
 	Use:   "polecat-stop-check",
@@ -86,31 +93,14 @@ func runTapPolecatStop(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check current branch — skip if on main/master
-	branchCmd := exec.Command("git", "-C", cloneDir, "rev-parse", "--abbrev-ref", "HEAD")
-	branchOut, err := branchCmd.Output()
-	if err != nil {
-		return nil // Can't determine branch — exit quietly
-	}
-	branch := strings.TrimSpace(string(branchOut))
-	if branch == "main" || branch == "master" || branch == "HEAD" {
-		return nil // On default branch — nothing to submit
-	}
-
-	// Check for commits ahead of origin/main
-	aheadCmd := exec.Command("git", "-C", cloneDir, "rev-list", "--count", "origin/main..HEAD")
-	aheadOut, err := aheadCmd.Output()
-	if err != nil {
-		return nil // Can't check — exit quietly (don't block session stop)
-	}
-	ahead := strings.TrimSpace(string(aheadOut))
-	if ahead == "0" {
-		return nil // No commits ahead — nothing to submit
+	pending := detectPolecatStopPendingWork(cloneDir)
+	if !pending.Pending {
+		return nil
 	}
 
 	// Polecat has pending work! Run gt done as a safety net.
 	fmt.Fprintf(os.Stderr, "\n")
-	fmt.Fprintf(os.Stderr, "⚠️  Polecat %s has %s unpushed commit(s) on branch %s\n", polecatName, ahead, branch)
+	fmt.Fprintf(os.Stderr, "⚠️  Polecat %s has pending work on branch %s: %s\n", polecatName, pending.Branch, pending.Summary)
 	fmt.Fprintf(os.Stderr, "   Auto-running gt done as safety net...\n")
 	fmt.Fprintf(os.Stderr, "\n")
 
@@ -136,4 +126,54 @@ func runTapPolecatStop(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func detectPolecatStopPendingWork(cloneDir string) polecatStopPendingWork {
+	result := polecatStopPendingWork{}
+
+	// Check current branch — skip if on main/master.
+	branchCmd := exec.Command("git", "-C", cloneDir, "rev-parse", "--abbrev-ref", "HEAD")
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return result // Can't determine branch — exit quietly
+	}
+	branch := strings.TrimSpace(string(branchOut))
+	result.Branch = branch
+	if branch == "main" || branch == "master" || branch == "HEAD" {
+		return result // On default branch — nothing to submit
+	}
+
+	workStatus, err := git.NewGit(cloneDir).CheckUncommittedWork()
+	if err == nil {
+		switch {
+		case workStatus.HasUncommittedChanges && !workStatus.CleanExcludingRuntime():
+			result.Pending = true
+			result.Summary = workStatus.String()
+			return result
+		case workStatus.StashCount > 0:
+			result.Pending = true
+			result.Summary = workStatus.String()
+			return result
+		case workStatus.UnpushedCommits > 0:
+			result.Pending = true
+			result.Summary = workStatus.String()
+			return result
+		}
+	}
+
+	// Branches without upstreams report zero unpushed commits above. Keep the
+	// origin/main comparison so polecat feature branches still get rescued.
+	aheadCmd := exec.Command("git", "-C", cloneDir, "rev-list", "--count", "origin/main..HEAD")
+	aheadOut, err := aheadCmd.Output()
+	if err != nil {
+		return result // Can't check — exit quietly (don't block session stop)
+	}
+	ahead := strings.TrimSpace(string(aheadOut))
+	if ahead == "0" {
+		return result // No commits ahead — nothing to submit
+	}
+
+	result.Pending = true
+	result.Summary = fmt.Sprintf("%s unpushed commit(s)", ahead)
+	return result
 }
