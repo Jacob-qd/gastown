@@ -1185,6 +1185,70 @@ func TestAddWithOptions_UsesCanonicalOriginDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestAllocateAndAdd_RunsWispSetupCommand(t *testing.T) {
+	mgr, _ := setupCanonicalBranchManagerTest(t)
+	writeWispSetupCommand(t, mgr, setupCommandWriteMarker("setup-marker"))
+
+	_, polecat, err := mgr.AllocateAndAdd(AddOptions{})
+	if err != nil {
+		t.Fatalf("AllocateAndAdd: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(polecat.ClonePath, "setup-marker"))
+	if err != nil {
+		t.Fatalf("setup command marker was not created: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "setup" {
+		t.Fatalf("setup marker = %q, want setup", got)
+	}
+}
+
+func TestAddWithOptions_SetupCommandFailureRollsBack(t *testing.T) {
+	mgr, _ := setupCanonicalBranchManagerTest(t)
+	writeWispSetupCommand(t, mgr, setupCommandFail())
+
+	_, err := mgr.AddWithOptions("toast", AddOptions{})
+	if err == nil {
+		t.Fatal("AddWithOptions should fail when setup_command fails")
+	}
+	if !strings.Contains(err.Error(), "setup_command failed") {
+		t.Fatalf("error = %q, want setup_command failure", err.Error())
+	}
+
+	polecatDir := filepath.Join(mgr.rig.Path, "polecats", "toast")
+	if _, statErr := os.Stat(polecatDir); !os.IsNotExist(statErr) {
+		t.Fatalf("polecat dir %s still exists after setup_command rollback", polecatDir)
+	}
+}
+
+func writeWispSetupCommand(t *testing.T, mgr *Manager, command string) {
+	t.Helper()
+
+	townRoot := filepath.Dir(mgr.rig.Path)
+	wispDir := filepath.Join(townRoot, ".beads-wisp", "config")
+	if err := os.MkdirAll(wispDir, 0755); err != nil {
+		t.Fatalf("mkdir wisp config: %v", err)
+	}
+	cfg := fmt.Sprintf(`{"rig":"%s","values":{"setup_command":%q},"blocked":[]}`, mgr.rig.Name, command)
+	if err := os.WriteFile(filepath.Join(wispDir, mgr.rig.Name+".json"), []byte(cfg), 0644); err != nil {
+		t.Fatalf("write wisp config: %v", err)
+	}
+}
+
+func setupCommandWriteMarker(marker string) string {
+	if os.PathSeparator == '\\' {
+		return "echo setup> " + marker
+	}
+	return "printf setup > " + marker
+}
+
+func setupCommandFail() string {
+	if os.PathSeparator == '\\' {
+		return "exit /b 7"
+	}
+	return "exit 7"
+}
+
 func TestReuseIdlePolecat_UsesCanonicalOriginDefaultBranch(t *testing.T) {
 	mgr, mayorRig := setupCanonicalBranchManagerTest(t)
 
@@ -2052,8 +2116,8 @@ func TestReuseIdlePolecat_KillsLiveSession(t *testing.T) {
 
 	// Verify it did NOT return ErrSessionRunning (the old buggy behavior)
 	if errors.Is(reuseErr, ErrSessionRunning) {
-		t.Fatalf("ReuseIdlePolecat returned ErrSessionRunning for live session — "+
-			"this is the sling-reuse-stale-session bug: idle polecats with live "+
+		t.Fatalf("ReuseIdlePolecat returned ErrSessionRunning for live session — " +
+			"this is the sling-reuse-stale-session bug: idle polecats with live " +
 			"sessions must have their session killed, not rejected")
 	}
 
