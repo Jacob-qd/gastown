@@ -189,6 +189,9 @@ func TestContainsPromptIndicator(t *testing.T) {
 		{"empty", "", false},
 		{"whitespace only", "   \n  \n  ", false},
 		{"bypass dialog", "Bypass Permissions mode\n1. No\n2. Yes, I accept", false},
+		{"html tag", "loading content\n</div>", false},
+		{"progress arrow", "downloading package ====>", false},
+		{"error type", "parse error: expected <string>", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

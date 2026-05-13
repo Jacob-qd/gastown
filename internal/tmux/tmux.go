@@ -1906,10 +1906,6 @@ func containsWorkspaceTrustDialog(content string) bool {
 		strings.Contains(content, "Do you trust the contents of this directory?")
 }
 
-// promptSuffixes are strings that indicate a shell or agent prompt is visible.
-// Claude prompt ends with ">", shell prompts end with "$", "%", "#", or "❯".
-var promptSuffixes = []string{">", "$", "%", "#", "❯"}
-
 // containsPromptIndicator checks if pane content contains a prompt indicator
 // that signals a shell or agent is ready (no dialog blocking it).
 func containsPromptIndicator(content string) bool {
@@ -1918,7 +1914,13 @@ func containsPromptIndicator(content string) bool {
 		if trimmed == "" {
 			continue
 		}
-		for _, suffix := range promptSuffixes {
+		if trimmed == ">" {
+			return true
+		}
+		if strings.HasSuffix(trimmed, "❯") {
+			return true
+		}
+		for _, suffix := range []string{"$", "%", "#"} {
 			if strings.HasSuffix(trimmed, suffix) {
 				return true
 			}
