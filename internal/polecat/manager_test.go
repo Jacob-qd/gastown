@@ -268,6 +268,40 @@ func TestRemoveNotFound(t *testing.T) {
 	}
 }
 
+func TestActiveWorkBeadsForCleanupFiltersAssignedIssues(t *testing.T) {
+	issues := []*beads.Issue{
+		{ID: "open-work", Status: "open", Type: "task"},
+		{ID: "progress-work", Status: "in_progress", Type: "task"},
+		{ID: "hooked-work", Status: beads.StatusHooked, Type: "task"},
+		{ID: "closed-work", Status: "closed", Type: "task"},
+		{ID: "agent", Status: "open", Type: "agent"},
+		{ID: "protected", Status: "open", Type: "task", Labels: []string{"gt:keep"}},
+		{ID: "deferred", Status: "deferred", Type: "task"},
+		nil,
+	}
+
+	got := activeWorkBeadsForCleanup(issues)
+	want := []string{"open-work", "progress-work", "hooked-work"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d issue(s), want %d: %#v", len(got), len(want), got)
+	}
+	for i := range got {
+		if got[i].ID != want[i] {
+			t.Fatalf("got IDs %v, want %v", issueIDs(got), want)
+		}
+	}
+}
+
+func issueIDs(issues []*beads.Issue) []string {
+	ids := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		if issue != nil {
+			ids = append(ids, issue.ID)
+		}
+	}
+	return ids
+}
+
 func TestPolecatDir(t *testing.T) {
 	r := &rig.Rig{
 		Name: "test-rig",
