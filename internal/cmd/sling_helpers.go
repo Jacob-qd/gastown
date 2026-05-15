@@ -1143,13 +1143,10 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		out, err := BdCmd("update", beadID, "--status=hooked", "--assignee="+targetAgent).
+		err := BdCmd("update", beadID, "--status=hooked", "--assignee="+targetAgent).
 			Dir(hookDir).
-			CombinedOutput()
+			Run()
 		if err != nil {
-			if len(out) > 0 {
-				err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
-			}
 			lastErr = err
 			// Fail fast on config/init errors — retrying won't help (gt-2ra)
 			if isSlingConfigError(err) {
@@ -1225,19 +1222,14 @@ func isSlingConfigError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	msg := err.Error()
 	return strings.Contains(msg, "not initialized") ||
 		strings.Contains(msg, "no such table") ||
 		strings.Contains(msg, "table not found") ||
 		strings.Contains(msg, "issue_prefix") ||
 		strings.Contains(msg, "no database") ||
 		strings.Contains(msg, "database not found") ||
-		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "circuit breaker") ||
-		strings.Contains(msg, "server appears down") ||
-		strings.Contains(msg, "server down") ||
-		strings.Contains(msg, "server is not running") ||
-		strings.Contains(msg, "server may not be running")
+		strings.Contains(msg, "connection refused")
 }
 
 // loadRigCommandVars reads rig settings and returns --var key=value strings
