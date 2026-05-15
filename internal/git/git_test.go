@@ -1594,6 +1594,13 @@ func TestStashCount_FiltersByBranch(t *testing.T) {
 	if count != 0 {
 		t.Errorf("StashCount from worktree = %d, want 0 (stash belongs to different branch)", count)
 	}
+	totalCount, err := wtGit.StashCountAll()
+	if err != nil {
+		t.Fatalf("StashCountAll: %v", err)
+	}
+	if totalCount != 1 {
+		t.Errorf("StashCountAll from worktree = %d, want 1 shared repo stash", totalCount)
+	}
 
 	// StashCount from main repo should be 1
 	mainCount, err := g.StashCount()
@@ -1624,6 +1631,13 @@ func TestStashCount_FiltersByBranch(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("StashCount from worktree after own stash = %d, want 1", count)
+	}
+	totalCount, err = wtGit.StashCountAll()
+	if err != nil {
+		t.Fatalf("StashCountAll after own stash: %v", err)
+	}
+	if totalCount != 2 {
+		t.Errorf("StashCountAll from worktree after own stash = %d, want 2 repo-wide stashes", totalCount)
 	}
 
 	// Main repo should still see 1 (only its own stash)
