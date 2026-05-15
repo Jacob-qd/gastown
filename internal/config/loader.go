@@ -433,7 +433,11 @@ func warnDeprecatedMergeQueueKeys(data []byte, path string) {
 	}
 	for _, key := range DeprecatedMergeQueueKeys {
 		if _, ok := raw.MergeQueue[key]; ok {
-			fmt.Fprintf(os.Stderr, "warning: %s: merge_queue.%s is deprecated and ignored (use rig default_branch instead)\n", path, key)
+			replacement := "rig default_branch"
+			if key == "integration_branches" {
+				replacement = "merge_queue.integration_branch_polecat_enabled and merge_queue.integration_branch_refinery_enabled"
+			}
+			fmt.Fprintf(os.Stderr, "warning: %s: merge_queue.%s is deprecated and ignored (use %s instead)\n", path, key, replacement)
 		}
 	}
 }

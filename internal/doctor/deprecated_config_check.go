@@ -278,7 +278,7 @@ func setRootDefaultBranchIfAbsent(path, targetBranch string) error {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return err
 			}
-			data = []byte(`{}`)
+			data = []byte(fmt.Sprintf(`{"type":"rig","version":1,"name":%s}`, jsonQuote(filepath.Base(filepath.Dir(path)))))
 		} else {
 			return err
 		}

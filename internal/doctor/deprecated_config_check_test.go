@@ -203,6 +203,12 @@ func TestDeprecatedMergeQueueKeysCheck_FixMigratesSettingsValues(t *testing.T) {
 	}
 
 	root := readJSONFile(t, filepath.Join(rigPath, "config.json"))
+	if got := jsonString(t, root["type"]); got != "rig" {
+		t.Fatalf("type = %q, want rig", got)
+	}
+	if got := jsonString(t, root["name"]); got != "testrig" {
+		t.Fatalf("name = %q, want testrig", got)
+	}
 	if got := jsonString(t, root["default_branch"]); got != "develop" {
 		t.Fatalf("default_branch = %q, want develop", got)
 	}
