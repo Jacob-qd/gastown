@@ -615,6 +615,46 @@ func SaveState(townRoot string, state *State) error {
 	return atomicfile.WriteJSON(stateFile, state)
 }
 
+func refreshPIDStateFromLiveInfo(townRoot string, config *Config, pid int) (bool, error) {
+	if pid <= 0 || config == nil || config.IsRemote() {
+		return false, nil
+	}
+
+	changed := false
+	if data, err := os.ReadFile(config.PidFile); err != nil || strings.TrimSpace(string(data)) != strconv.Itoa(pid) {
+		if err := os.MkdirAll(filepath.Dir(config.PidFile), 0755); err != nil {
+			return changed, err
+		}
+		if err := atomicfile.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)+"\n"), 0644); err != nil {
+			return changed, err
+		}
+		changed = true
+	}
+
+	state, err := LoadState(townRoot)
+	if err != nil {
+		return changed, err
+	}
+	if state == nil {
+		state = &State{}
+	}
+	if state.PID != pid || !state.Running || state.Port != config.Port || state.DataDir != config.DataDir {
+		state.PID = pid
+		state.Running = true
+		state.Port = config.Port
+		state.DataDir = config.DataDir
+		if state.StartedAt.IsZero() {
+			state.StartedAt = time.Now()
+		}
+		if err := SaveState(townRoot, state); err != nil {
+			return changed, err
+		}
+		changed = true
+	}
+
+	return changed, nil
+}
+
 // countDoltDatabases counts the number of Dolt database directories in dataDir.
 // Each subdirectory containing a .dolt directory is considered a database.
 // Returns at least 1 so the caller never divides by zero.
@@ -662,6 +702,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 	// sql-server process, but .dolt/sql-server.info is written by Dolt itself.
 	if info, err := readSQLServerInfo(config); err == nil && info.Port == config.Port && info.PID > 0 {
 		if processIsAlive(info.PID) && isDoltServerOnPort(config.Port) && doltProcessMatchesTown(townRoot, info.PID, config) {
+			_, _ = refreshPIDStateFromLiveInfo(townRoot, config, info.PID)
 			return true, info.PID, nil
 		}
 	}
@@ -1617,25 +1658,10 @@ func Start(townRoot string) error {
 					fmt.Fprintf(os.Stderr, "Warning: port %d still occupied after imposter kill: %v\n", config.Port, err)
 				}
 			} else {
-				// Server is legitimate — verify PID file is correct (gm-ouur fix)
-				// If PID file is stale/missing but server is on port, update it
-				pidFromFile := 0
-				if data, err := os.ReadFile(config.PidFile); err == nil {
-					pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
-				}
-				if pidFromFile != pid {
-					// PID file is stale/wrong - update it
-					fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
-					if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
-					}
-					// Update state too
-					state, _ := LoadState(townRoot)
-					if state != nil && state.PID != pid {
-						state.PID = pid
-						state.Running = true
-						_ = SaveState(townRoot, state)
-					}
+				if changed, refreshErr := refreshPIDStateFromLiveInfo(townRoot, config, pid); refreshErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not refresh Dolt PID state: %v\n", refreshErr)
+				} else if changed {
+					fmt.Printf("Refreshed stale Dolt PID state (actual %d)\n", pid)
 				}
 				return nil // already running and legitimate — idempotent success
 			}

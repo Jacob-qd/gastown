@@ -2348,6 +2348,58 @@ func TestLoadState_CorruptJSON(t *testing.T) {
 	}
 }
 
+func TestRefreshPIDStateFromLiveInfo(t *testing.T) {
+	townRoot := t.TempDir()
+	config := DefaultConfig(townRoot)
+	if err := os.MkdirAll(filepath.Dir(config.PidFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.PidFile, []byte("999999\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(townRoot, &State{Running: true, PID: 999999, Port: config.Port, DataDir: config.DataDir}); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := refreshPIDStateFromLiveInfo(townRoot, config, 12345)
+	if err != nil {
+		t.Fatalf("refreshPIDStateFromLiveInfo: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected stale PID state to change")
+	}
+
+	pidData, err := os.ReadFile(config.PidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(pidData)) != "12345" {
+		t.Fatalf("pid file = %q, want 12345", string(pidData))
+	}
+	state, err := LoadState(townRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Running || state.PID != 12345 || state.Port != config.Port || state.DataDir != config.DataDir {
+		t.Fatalf("state not refreshed: %#v", state)
+	}
+}
+
+func TestRefreshPIDStateFromLiveInfoInvalidPIDNoop(t *testing.T) {
+	townRoot := t.TempDir()
+	config := DefaultConfig(townRoot)
+	changed, err := refreshPIDStateFromLiveInfo(townRoot, config, 0)
+	if err != nil {
+		t.Fatalf("refreshPIDStateFromLiveInfo: %v", err)
+	}
+	if changed {
+		t.Fatal("invalid PID should not change state")
+	}
+	if _, err := os.Stat(config.PidFile); !os.IsNotExist(err) {
+		t.Fatalf("pid file should not exist, err=%v", err)
+	}
+}
+
 // =============================================================================
 // Rollback round-trip test
 // =============================================================================
