@@ -121,19 +121,29 @@ func pointsToAgentsMD(target string) bool {
 
 // commandsInherited reports whether workDir will receive slash commands via
 // Claude Code's path-hierarchy traversal without explicit provisioning.
-// This is true when workDir is nested inside a git repository that is also
-// a Gas Town workspace root: Claude Code walks up from workDir to the git
-// root and loads .claude/commands/ along the way, so any commands provisioned
-// at the workspace root are automatically visible to the agent.
-// Provisioning a second copy inside workDir would cause each command to appear
-// twice in the agent's command palette.
+// Commands are inherited when workDir is inside a Gas Town workspace root and
+// not separated from it by a nested git repo. Crew and polecat workdirs are
+// nested repos, so they still get their own command provisioning.
 func commandsInherited(workDir string) bool {
-	gitRoot := gitRootOf(workDir)
-	if gitRoot == "" || gitRoot == workDir {
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" || samePath(townRoot, workDir) {
 		return false
 	}
-	isWS, err := workspace.IsWorkspace(gitRoot)
-	return err == nil && isWS
+
+	gitRoot := gitRootOf(workDir)
+	if gitRoot != "" && !samePath(gitRoot, townRoot) {
+		return false
+	}
+	return true
+}
+
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return filepath.Clean(absA) == filepath.Clean(absB)
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 // gitRootOf walks up from dir to find the nearest ancestor directory containing
