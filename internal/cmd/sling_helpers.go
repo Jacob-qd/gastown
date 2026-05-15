@@ -1153,7 +1153,7 @@ func hookBeadWithRetry(beadID, targetAgent, hookDir string) error {
 			lastErr = err
 			// Fail fast on config/init errors — retrying won't help (gt-2ra)
 			if isSlingConfigError(err) {
-				return fmt.Errorf("hooking bead failed (non-retryable Dolt/beads failure — not retrying): %w\nSafe next action: run `gt dolt status` and `bd show %s` to verify whether a durable hook exists before re-slinging", err, beadID)
+				return fmt.Errorf("hooking bead failed (DB not initialized — not retrying): %w", err)
 			}
 			if attempt < maxRetries {
 				backoff := slingBackoff(attempt, baseBackoff, maxBackoff)

@@ -236,8 +236,6 @@ func runSlingFormula(ctx context.Context, args []string) error {
 	// See: https://github.com/steveyegge/gastown/issues/148.
 	hookDir := beads.ResolveHookDir(townRoot, wispRootID, "")
 	if err := hookBeadWithRetry(wispRootID, targetAgent, hookDir); err != nil {
-		rollbackSpawned(wispRootID)
-		cleanupStandaloneWispAfterHookFailure(wispRootID, hookDir)
 		return err
 	}
 	fmt.Printf("%s Attached to hook (status=hooked)\n", style.Bold.Render("✓"))

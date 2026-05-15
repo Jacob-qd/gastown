@@ -331,16 +331,24 @@ func executeSling(params SlingParams) (*SlingResult, error) {
 	// Acquire per-assignee lock to serialize concurrent hook writes (issue #3114).
 	assigneeUnlock, assigneeLockErr := tryAcquireSlingAssigneeLock(townRoot, targetAgent)
 	if assigneeLockErr != nil {
-		cleanupPartialSlingAfterHookFailure(spawnInfo, beadToHook, hookWorkDir, convoyID, attachedMoleculeID, info.Status, info.Assignee)
-		result.ErrMsg = assigneeLockErr.Error()
+		if canRollbackWorkBead(info.Status, info.Assignee) {
+			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir, convoyID)
+		} else {
+			cleanupSpawnedPolecat(spawnInfo, params.RigName, convoyID)
+		}
+		result.ErrMsg = "assignee lock failed"
 		return result, fmt.Errorf("serializing hook write for %s: %w", targetAgent, assigneeLockErr)
 	}
 	defer assigneeUnlock()
 	hookDir := beads.ResolveHookDir(townRoot, beadToHook, hookWorkDir)
 	if err := hookBeadWithRetry(beadToHook, targetAgent, hookDir); err != nil {
 		// Clean up orphaned polecat to avoid leaving spawned-but-unhookable polecats
-		cleanupPartialSlingAfterHookFailure(spawnInfo, beadToHook, hookWorkDir, convoyID, attachedMoleculeID, info.Status, info.Assignee)
-		result.ErrMsg = err.Error()
+		if canRollbackWorkBead(info.Status, info.Assignee) {
+			rollbackSlingArtifactsFn(spawnInfo, beadToHook, hookWorkDir, convoyID)
+		} else {
+			cleanupSpawnedPolecat(spawnInfo, params.RigName, convoyID)
+		}
+		result.ErrMsg = "hook failed"
 		return result, fmt.Errorf("failed to hook bead: %w", err)
 	}
 

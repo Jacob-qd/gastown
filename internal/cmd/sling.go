@@ -957,16 +957,17 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	// same assignee's row in Dolt, causing silent rollbacks (issue #3114).
 	assigneeUnlock, assigneeLockErr := tryAcquireSlingAssigneeLock(townRoot, targetAgent)
 	if assigneeLockErr != nil {
-		if newPolecatInfo != nil {
-			cleanupPartialSlingAfterHookFailure(newPolecatInfo, beadID, hookWorkDir, convoyID, attachedMoleculeID, originalStatus, originalAssignee)
-		}
 		return fmt.Errorf("serializing hook write for %s: %w", targetAgent, assigneeLockErr)
 	}
 	defer assigneeUnlock()
 	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
 		if newPolecatInfo != nil {
-			cleanupPartialSlingAfterHookFailure(newPolecatInfo, beadID, hookWorkDir, convoyID, attachedMoleculeID, originalStatus, originalAssignee)
+			if canRollbackWorkBead(originalStatus, originalAssignee) {
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, convoyID)
+			} else {
+				cleanupSpawnedPolecat(newPolecatInfo, newPolecatInfo.RigName, convoyID)
+			}
 		}
 		return err
 	}
@@ -1289,39 +1290,4 @@ func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, 
 
 func canRollbackWorkBead(originalStatus, originalAssignee string) bool {
 	return (originalStatus == "" || originalStatus == "open") && originalAssignee == ""
-}
-
-func cleanupPartialSlingAfterHookFailure(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, convoyID, attachedMoleculeID, originalStatus, originalAssignee string) {
-	townRoot, _ := workspace.FindFromCwdOrError()
-	if canRollbackWorkBead(originalStatus, originalAssignee) {
-		rollbackSlingArtifactsFn(spawnInfo, beadID, hookWorkDir, convoyID)
-		return
-	}
-	if attachedMoleculeID != "" && townRoot != "" {
-		if err := burnExistingMolecules([]string{attachedMoleculeID}, beadID, townRoot); err != nil {
-			fmt.Printf("  %s Could not clean fresh molecule %s after hook failure: %v\n", style.Dim.Render("Warning:"), attachedMoleculeID, err)
-		}
-	}
-	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName, convoyID)
-	restoreOriginalAssignment(townRoot, beadID, hookWorkDir, originalStatus, originalAssignee)
-}
-
-func restoreOriginalAssignment(townRoot, beadID, hookWorkDir, originalStatus, originalAssignee string) {
-	if beadID == "" || originalStatus == "" {
-		return
-	}
-	restoreDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
-	args := []string{"update", beadID, "--status=" + originalStatus}
-	if originalAssignee != "" {
-		args = append(args, "--assignee="+originalAssignee)
-	}
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = restoreDir
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("  %s Could not restore original assignment for %s (status=%s assignee=%s): %v\n",
-			style.Dim.Render("Warning:"), beadID, originalStatus, originalAssignee, err)
-	} else {
-		fmt.Printf("  %s Restored original assignment for %s (status=%s assignee=%s)\n",
-			style.Dim.Render("○"), beadID, originalStatus, originalAssignee)
-	}
 }

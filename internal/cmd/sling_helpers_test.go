@@ -277,9 +277,6 @@ exit 1
 	if !strings.Contains(err.Error(), "Dolt circuit breaker is open") {
 		t.Fatalf("error missing bd stderr: %v", err)
 	}
-	if !strings.Contains(err.Error(), "Safe next action") {
-		t.Fatalf("error missing reconciliation guidance: %v", err)
-	}
 	countBytes, readErr := os.ReadFile(countPath)
 	if readErr != nil {
 		t.Fatalf("read count: %v", readErr)
@@ -309,39 +306,5 @@ func TestCanRollbackWorkBead(t *testing.T) {
 				t.Fatalf("canRollbackWorkBead(%q, %q) = %v, want %v", tt.status, tt.assignee, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestRestoreOriginalAssignment(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses Unix shell script bd stub")
-	}
-	beads.ResetBdAllowStaleCacheForTest()
-	t.Cleanup(beads.ResetBdAllowStaleCacheForTest)
-
-	binDir := t.TempDir()
-	logPath := filepath.Join(binDir, "bd.log")
-	script := fmt.Sprintf(`#!/bin/sh
-if [ "$1" = "--allow-stale" ]; then
-  echo "Error: unknown flag: --allow-stale" >&2
-  exit 0
-fi
-printf '%%s\n' "$*" >> %q
-exit 0
-`, logPath)
-	if err := os.WriteFile(filepath.Join(binDir, "bd"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write bd stub: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	restoreOriginalAssignment(t.TempDir(), "gt-work", "", "hooked", "gastown/polecats/rust")
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read bd log: %v", err)
-	}
-	got := strings.TrimSpace(string(data))
-	want := "update gt-work --status=hooked --assignee=gastown/polecats/rust"
-	if got != want {
-		t.Fatalf("restore command = %q, want %q", got, want)
 	}
 }
