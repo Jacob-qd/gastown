@@ -134,3 +134,25 @@ func TestEnsureConfigYAML_DisablesAutoExport(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigYAMLDisablesAutoExport(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"double quoted false", "export.auto: \"false\"\n", true},
+		{"single quoted false", "export.auto: 'false'\n", true},
+		{"bare false", "export.auto: false\n", true},
+		{"true", "export.auto: true\n", false},
+		{"missing", "prefix: hq\n", false},
+		{"comment only", "# export.auto: false\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ConfigYAMLDisablesAutoExport(tt.content); got != tt.want {
+				t.Fatalf("ConfigYAMLDisablesAutoExport() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
