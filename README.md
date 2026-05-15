@@ -146,14 +146,15 @@ Homebrew installs `gt`, `bd`, and `dolt` together.
 brew install gastown
 ```
 
-Avoid `go install` on macOS. The unsigned binary it produces gets killed by Gatekeeper. To build from source on macOS, install Dolt with Homebrew and build `gt` with `make`.
+Avoid `go install` on macOS. The unsigned binary it produces gets killed by Gatekeeper. To build from source on macOS, install Dolt with Homebrew, install `bd` with Go, put `~/.local/bin` ahead of stale binary locations, and build `gt` with `make install`.
 
 ```bash
 brew install dolt
+go install github.com/steveyegge/beads/cmd/bd@latest
+export PATH="$HOME/.local/bin:$PATH:$HOME/go/bin"
 git clone https://github.com/steveyegge/gastown.git
 cd gastown
-make build
-mv gt "$HOME/go/bin/"
+make install
 ```
 
 #### Install gt on Linux
@@ -174,7 +175,7 @@ source ~/.bashrc
 
 #### Install gt on Windows
 
-Install `gt` and `bd` with `go install`.
+Install Dolt by following the [Dolt installation guide](https://github.com/dolthub/dolt#installation), then install `gt` and `bd` with `go install`.
 
 ```powershell
 go install github.com/steveyegge/gastown/cmd/gt@latest
@@ -271,6 +272,8 @@ Run
 ```shell
 gt install ~/gt --git &&
 cd ~/gt &&
+gt up &&
+gt doctor --fix &&
 gt config agent list &&
 gt mayor attach
 ```

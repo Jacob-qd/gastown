@@ -141,7 +141,7 @@ cap_add:
   - NET_RAW
 ```
 
-`no-new-privileges` prevents any process inside the container from elevating privileges via setuid binaries. The five added capabilities cover what `apt`, `git`, the build steps, and per-process file ownership need at runtime. `NET_RAW` is included for tools that emit ICMP, which is mostly diagnostics.
+`no-new-privileges` prevents any process inside the container from elevating privileges via setuid binaries. The six added capabilities cover what `apt`, `git`, the build steps, and per-process file ownership need at runtime. `NET_RAW` is included for tools that emit ICMP, which is mostly diagnostics.
 
 `stdin_open: false` and `tty: false` mean the long-running `sleep infinity` foreground process does not hold a TTY. Interactive sessions come through `docker compose exec` instead.
 
@@ -293,4 +293,3 @@ You typically do not run `Dockerfile.e2e` directly. CI does.
 ## CI integration
 
 Three workflows under `.github/workflows/` use Docker. `e2e.yml` builds and runs `Dockerfile.e2e` for each PR — the e2e workflow is where install-flow regressions surface. `ci.yml` and `nightly-integration.yml` pre-pull `dolthub/dolt-sql-server` images for tests that need a Dolt server outside a full Gas Town environment. The production runtime `Dockerfile` is not used by CI.
-
