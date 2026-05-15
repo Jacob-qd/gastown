@@ -285,3 +285,26 @@ exit 1
 		t.Fatalf("bd update invoked %s times, want 1", got)
 	}
 }
+
+func TestCanRollbackWorkBead(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   string
+		assignee string
+		want     bool
+	}{
+		{name: "open unassigned", status: "open", want: true},
+		{name: "empty unassigned", want: true},
+		{name: "open assigned", status: "open", assignee: "gastown/polecats/rust", want: false},
+		{name: "pinned", status: "pinned", assignee: "mayor", want: false},
+		{name: "hooked", status: "hooked", assignee: "gastown/polecats/rust", want: false},
+		{name: "in progress", status: "in_progress", assignee: "gastown/polecats/rust", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := canRollbackWorkBead(tt.status, tt.assignee); got != tt.want {
+				t.Fatalf("canRollbackWorkBead(%q, %q) = %v, want %v", tt.status, tt.assignee, got, tt.want)
+			}
+		})
+	}
+}

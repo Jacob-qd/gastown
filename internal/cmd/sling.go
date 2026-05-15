@@ -963,7 +963,11 @@ func runSling(cmd *cobra.Command, args []string) (retErr error) {
 	hookDir := beads.ResolveHookDir(townRoot, beadID, hookWorkDir)
 	if err := hookBeadWithRetry(beadID, targetAgent, hookDir); err != nil {
 		if newPolecatInfo != nil {
-			rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, convoyID)
+			if canRollbackWorkBead(originalStatus, originalAssignee) {
+				rollbackSlingArtifactsFn(newPolecatInfo, beadID, hookWorkDir, convoyID)
+			} else {
+				cleanupSpawnedPolecat(newPolecatInfo, newPolecatInfo.RigName, convoyID)
+			}
 		}
 		return err
 	}
@@ -1282,4 +1286,8 @@ func rollbackSlingArtifacts(spawnInfo *SpawnedPolecatInfo, beadID, hookWorkDir, 
 
 	// 3. Clean up the spawned polecat (worktree, agent bead, convoy, etc.)
 	cleanupSpawnedPolecat(spawnInfo, spawnInfo.RigName, convoyID)
+}
+
+func canRollbackWorkBead(originalStatus, originalAssignee string) bool {
+	return (originalStatus == "" || originalStatus == "open") && originalAssignee == ""
 }
