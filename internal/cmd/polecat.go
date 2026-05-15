@@ -1129,7 +1129,7 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 		mqBd := beads.New(r.Path)
 		beadTerminal := isAssignedBeadTerminal(mqBd, status.Issue)
 		gitState, gitErr := getGitState(p.ClonePath)
-		hasSubmittableWork := gitErr != nil || gitState.UnpushedCommits > 0
+		hasSubmittableWork := hasSubmittableWorkForRecovery(p.ClonePath, gitState, gitErr)
 		applyMQCheck(&status, mqBd, beadTerminal, hasSubmittableWork)
 	}
 
@@ -1212,17 +1212,70 @@ func activeMRBlocker(bd issueShower, mrID string) string {
 	mr, err := bd.Show(mrID)
 	if err != nil {
 		if errors.Is(err, beads.ErrNotFound) {
-			return fmt.Sprintf("active_mr=%s status=missing", mrID)
+			return ""
 		}
 		return fmt.Sprintf("active_mr=%s status=lookup_error: %v", mrID, err)
 	}
 	if mr == nil {
-		return fmt.Sprintf("active_mr=%s status=missing", mrID)
+		return ""
 	}
 	if beads.IssueStatus(mr.Status).IsTerminal() {
 		return ""
 	}
 	return fmt.Sprintf("active_mr=%s status=%s", mrID, mr.Status)
+}
+
+func hasSubmittableWorkForRecovery(worktreePath string, gitState *GitState, gitErr error) bool {
+	if count, err := commitsAheadOfUpstream(worktreePath); err == nil {
+		return count > 0
+	}
+	return gitErr != nil || (gitState != nil && gitState.UnpushedCommits > 0)
+}
+
+func commitsAheadOfUpstream(worktreePath string) (int, error) {
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCmd.Dir = worktreePath
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	branch := strings.TrimSpace(string(branchOut))
+	if branch == "" {
+		return 0, fmt.Errorf("empty branch")
+	}
+
+	upstreamCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{u}")
+	upstreamCmd.Dir = worktreePath
+	upstreamOut, err := upstreamCmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	upstream := strings.TrimSpace(string(upstreamOut))
+	if upstream == "" {
+		return 0, fmt.Errorf("empty upstream")
+	}
+	upstreamBranch := strings.TrimPrefix(upstream, "origin/")
+	if !isRecoveryBaseBranch(upstreamBranch) || (upstreamBranch == branch && !isRecoveryBaseBranch(branch)) {
+		return 0, fmt.Errorf("upstream %q is not a recovery base", upstream)
+	}
+
+	countCmd := exec.Command("git", "cherry", upstream, "HEAD")
+	countCmd.Dir = worktreePath
+	countOut, err := countCmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(countOut)), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "+ ") {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func isRecoveryBaseBranch(branch string) bool {
+	return branch == "main" || branch == "master" || strings.HasPrefix(branch, "integration/")
 }
 
 // mrFinder is the subset of *beads.Beads that applyMQCheck needs. It lets us

@@ -3,6 +3,9 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -148,7 +151,8 @@ func TestActiveMRBlocker(t *testing.T) {
 		{name: "empty", want: ""},
 		{name: "closed", mrID: "mr-1", bd: fakeIssueShower{issue: &beads.Issue{ID: "mr-1", Status: "closed"}}, want: ""},
 		{name: "open", mrID: "mr-1", bd: fakeIssueShower{issue: &beads.Issue{ID: "mr-1", Status: "open"}}, want: "active_mr=mr-1 status=open"},
-		{name: "missing", mrID: "mr-1", bd: fakeIssueShower{err: beads.ErrNotFound}, want: "active_mr=mr-1 status=missing"},
+		{name: "missing", mrID: "mr-1", bd: fakeIssueShower{err: beads.ErrNotFound}, want: ""},
+		{name: "nil issue", mrID: "mr-1", bd: fakeIssueShower{issue: nil}, want: ""},
 		{name: "nil reader", mrID: "mr-1", bd: nil, want: "active_mr=mr-1 status=unverified"},
 		{name: "lookup error", mrID: "mr-1", bd: fakeIssueShower{err: errors.New("bd exploded")}, want: "active_mr=mr-1 status=lookup_error: bd exploded"},
 	}
@@ -213,5 +217,107 @@ func TestDryRunNukeSummary(t *testing.T) {
 				t.Errorf("dryRunNukeSummary() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestHasSubmittableWorkForRecoveryUsesUpstream(t *testing.T) {
+	repo := setupRecoveryGitRepo(t)
+
+	if got := hasSubmittableWorkForRecovery(repo, &GitState{UnpushedCommits: 99}, nil); got {
+		t.Fatal("branch with no commits ahead of its upstream should not require MQ submission")
+	}
+
+	writeRecoveryFile(t, filepath.Join(repo, "change.txt"), "change")
+	runGit(t, repo, "add", "change.txt")
+	runGit(t, repo, "commit", "-m", "change")
+
+	if got := hasSubmittableWorkForRecovery(repo, &GitState{}, nil); !got {
+		t.Fatal("branch with commits ahead of its upstream should require MQ submission")
+	}
+}
+
+func TestHasSubmittableWorkForRecoveryIgnoresSelfUpstream(t *testing.T) {
+	repo := setupRecoveryGitRepo(t)
+	runGit(t, repo, "switch", "-c", "polecat/test")
+	writeRecoveryFile(t, filepath.Join(repo, "feature.txt"), "feature")
+	runGit(t, repo, "add", "feature.txt")
+	runGit(t, repo, "commit", "-m", "feature")
+	runGit(t, repo, "push", "-u", "origin", "polecat/test")
+
+	if got := hasSubmittableWorkForRecovery(repo, &GitState{UnpushedCommits: 1}, nil); !got {
+		t.Fatal("self-upstream feature branch should fall back and preserve MQ requirement")
+	}
+}
+
+func TestHasSubmittableWorkForRecoveryIgnoresPatchEquivalentBranch(t *testing.T) {
+	repo := setupRecoveryGitRepo(t)
+	runGit(t, repo, "switch", "-c", "polecat/equivalent")
+	writeRecoveryFile(t, filepath.Join(repo, "equiv.txt"), "equiv")
+	runGit(t, repo, "add", "equiv.txt")
+	runGit(t, repo, "commit", "-m", "equiv")
+	runGit(t, repo, "switch", "integration/test")
+	writeRecoveryFile(t, filepath.Join(repo, "other.txt"), "other")
+	runGit(t, repo, "add", "other.txt")
+	runGit(t, repo, "commit", "-m", "other")
+	runGit(t, repo, "cherry-pick", "polecat/equivalent")
+	runGit(t, repo, "push", "origin", "integration/test")
+	runGit(t, repo, "switch", "polecat/equivalent")
+	runGit(t, repo, "branch", "--set-upstream-to=origin/integration/test")
+
+	if got := hasSubmittableWorkForRecovery(repo, &GitState{UnpushedCommits: 99}, nil); got {
+		t.Fatal("patch-equivalent branch should not require MQ submission")
+	}
+}
+
+func TestHasSubmittableWorkForRecoveryFallback(t *testing.T) {
+	if got := hasSubmittableWorkForRecovery("/does/not/exist", &GitState{UnpushedCommits: 0}, nil); got {
+		t.Fatal("clean fallback git state should not require MQ submission")
+	}
+	if got := hasSubmittableWorkForRecovery("/does/not/exist", &GitState{UnpushedCommits: 1}, nil); !got {
+		t.Fatal("unpushed fallback git state should require MQ submission")
+	}
+	if got := hasSubmittableWorkForRecovery("/does/not/exist", nil, errors.New("git failed")); !got {
+		t.Fatal("git-state error fallback should remain conservative")
+	}
+}
+
+func setupRecoveryGitRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	repo := filepath.Join(root, "repo")
+	runCmd(t, root, "git", "init", "--bare", remote)
+	runCmd(t, root, "git", "init", repo)
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	writeRecoveryFile(t, filepath.Join(repo, "README.md"), "base")
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-m", "base")
+	runGit(t, repo, "branch", "-M", "main")
+	runGit(t, repo, "remote", "add", "origin", remote)
+	runGit(t, repo, "push", "-u", "origin", "main")
+	runGit(t, repo, "switch", "-c", "integration/test")
+	runGit(t, repo, "push", "-u", "origin", "integration/test")
+	return repo
+}
+
+func writeRecoveryFile(t *testing.T, path, data string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	runCmd(t, dir, "git", args...)
+}
+
+func runCmd(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
 }
