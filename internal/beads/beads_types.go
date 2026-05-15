@@ -69,6 +69,9 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 	if prefix == "" {
 		return fallbackDir
 	}
+	if agentBeadIDMatchesRoute(townRoot, prefix, beadID) {
+		return ResolveBeadsDir(townRoot)
+	}
 
 	// Look up rig path for this prefix
 	rigPath := GetRigPathForPrefix(townRoot, prefix)
@@ -85,6 +88,42 @@ func ResolveRoutingTarget(townRoot, beadID, fallbackDir string) string {
 	}
 
 	return beadsDir
+}
+
+func agentBeadIDMatchesRoute(townRoot, prefix, beadID string) bool {
+	rigName := GetRigNameForPrefix(townRoot, prefix)
+	if rigName == "" {
+		return false
+	}
+
+	parts := strings.Split(beadID, "-")
+	prefixPart := strings.TrimSuffix(prefix, "-")
+	if len(parts) < 2 || parts[0] != prefixPart {
+		return false
+	}
+
+	suffix := parts[1:]
+	if prefixPart == rigName && isAgentRoleSuffix(suffix) {
+		return true
+	}
+
+	rigParts := strings.Split(rigName, "-")
+	if len(suffix) <= len(rigParts) || !stringSliceHasPrefix(suffix, rigParts) {
+		return false
+	}
+	return isAgentRoleSuffix(suffix[len(rigParts):])
+}
+
+func stringSliceHasPrefix(values, prefix []string) bool {
+	if len(values) < len(prefix) {
+		return false
+	}
+	for i, value := range prefix {
+		if values[i] != value {
+			return false
+		}
+	}
+	return true
 }
 
 // EnsureCustomTypes ensures the target beads directory has custom types configured.

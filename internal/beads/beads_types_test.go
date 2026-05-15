@@ -224,6 +224,7 @@ func TestResolveRoutingTarget(t *testing.T) {
 
 	// Create routes.jsonl
 	routesContent := `{"prefix": "gt-", "path": "gastown/mayor/rig"}
+{"prefix": "xx-", "path": "my-rig/mayor/rig"}
 {"prefix": "hq-", "path": "."}
 `
 	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
@@ -233,6 +234,10 @@ func TestResolveRoutingTarget(t *testing.T) {
 	// Create the rig beads directory
 	rigBeadsDir := filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads")
 	if err := os.MkdirAll(rigBeadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	hyphenatedRigBeadsDir := filepath.Join(tmpDir, "my-rig", "mayor", "rig", ".beads")
+	if err := os.MkdirAll(hyphenatedRigBeadsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,8 +252,32 @@ func TestResolveRoutingTarget(t *testing.T) {
 		{
 			name:     "rig-level bead routes to rig",
 			townRoot: tmpDir,
-			beadID:   "gt-gastown-polecat-Toast",
+			beadID:   "gt-work-123",
 			expected: rigBeadsDir,
+		},
+		{
+			name:     "rig-prefixed agent bead routes to town",
+			townRoot: tmpDir,
+			beadID:   "gt-gastown-polecat-Toast",
+			expected: beadsDir,
+		},
+		{
+			name:     "hyphenated rig agent bead routes to town",
+			townRoot: tmpDir,
+			beadID:   "xx-my-rig-polecat-nux",
+			expected: beadsDir,
+		},
+		{
+			name:     "role-like work bead routes to rig",
+			townRoot: tmpDir,
+			beadID:   "gt-fix-polecat-crash",
+			expected: rigBeadsDir,
+		},
+		{
+			name:     "hyphenated role-like work bead routes to rig",
+			townRoot: tmpDir,
+			beadID:   "xx-fix-polecat-crash",
+			expected: hyphenatedRigBeadsDir,
 		},
 		{
 			name:     "town-level bead routes to town",
@@ -259,7 +288,7 @@ func TestResolveRoutingTarget(t *testing.T) {
 		{
 			name:     "unknown prefix falls back",
 			townRoot: tmpDir,
-			beadID:   "xx-unknown",
+			beadID:   "yy-unknown",
 			expected: fallback,
 		},
 		{

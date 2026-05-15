@@ -279,11 +279,12 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 	if err == nil {
 		return issue, nil
 	}
+	target := b.agentBeadTarget()
 
 	// Create failed - need to do Show→Reopen→Update which requires locking
 	// to prevent concurrent modifications (e.g., nuke clearing fields while
 	// spawn is updating them). See gt-joazs.
-	fl, lockErr := b.lockAgentBead(id)
+	fl, lockErr := target.lockAgentBead(id)
 	if lockErr != nil {
 		return nil, fmt.Errorf("locking agent bead %s: %w", id, lockErr)
 	}
@@ -291,8 +292,6 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 
 	// Create failed - check if bead already exists (handles both open and closed states)
 	createErr := err
-
-	target := b.agentBeadTarget()
 
 	existing, showErr := target.Show(id)
 	if showErr != nil {
@@ -341,16 +340,16 @@ func (b *Beads) CreateOrReopenAgentBead(id, title string, fields *AgentFields) (
 //
 // This is the standard nuke path (gt-14b8o).
 func (b *Beads) ResetAgentBeadForReuse(id, reason string) error {
+	target := b.agentBeadTarget()
+
 	// Lock the agent bead to prevent concurrent read-modify-write races.
 	// Without this, a concurrent CreateOrReopenAgentBead could overwrite
 	// the nuked state we're about to set. See gt-joazs.
-	fl, lockErr := b.lockAgentBead(id)
+	fl, lockErr := target.lockAgentBead(id)
 	if lockErr != nil {
 		return fmt.Errorf("locking agent bead %s: %w", id, lockErr)
 	}
 	defer func() { _ = fl.Unlock() }()
-
-	target := b.agentBeadTarget()
 
 	// Get current issue to preserve immutable fields (title, role_type, rig)
 	issue, err := target.Show(id)
@@ -671,8 +670,8 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 			continue
 		}
 		// Fallback: wisps JSON may omit issue_type/labels fields.
-		// Detect agent beads by ID pattern (prefix-rig-role format).
-		if isAgentBeadByID(w.ID) {
+		// Detect agent beads by ID pattern using route metadata when available.
+		if b.isAgentBeadByID(w.ID) {
 			result[w.ID] = w
 		}
 	}
@@ -680,28 +679,55 @@ func (b *Beads) ListAgentBeadsFromWisps() (map[string]*Issue, error) {
 	return result, nil
 }
 
-// isAgentBeadByID detects agent beads by their ID naming convention.
-// Agent bead IDs follow two patterns:
-//   - Full form (prefix != rig): prefix-rig-role[-name] (e.g., gt-gastown-witness)
-//   - Collapsed form (prefix == rig): prefix-role[-name] (e.g., bcc-witness)
+func (b *Beads) isAgentBeadByID(id string) bool {
+	if prefix := ExtractPrefix(id); prefix != "" && agentBeadIDMatchesRoute(b.getTownRoot(), prefix, id) {
+		return true
+	}
+	return isAgentBeadByID(id)
+}
+
+// isAgentBeadByID detects collapsed agent bead IDs when route metadata is not
+// available. Route-aware callers should use (*Beads).isAgentBeadByID so full
+// forms such as prefix-rig-polecat-name can be validated against the known rig.
 //
-// where role is one of: witness, refinery, crew, polecat, deacon, mayor.
-// The collapsed form has only 2 parts for role-only IDs, so we must check
-// from parts[1:] not parts[2:].
+// Collapsed agent bead IDs follow prefix-role[-name] (e.g., bcc-witness).
 func isAgentBeadByID(id string) bool {
 	parts := strings.Split(id, "-")
 	if len(parts) < 2 {
 		return false
 	}
-	// Check parts[1:] to handle both full-form (role at parts[2]) and
-	// collapsed-form (role at parts[1]) agent bead IDs.
-	for _, part := range parts[1:] {
-		switch part {
-		case constants.RoleWitness, constants.RoleRefinery, constants.RoleCrew, constants.RolePolecat, constants.RoleDeacon, constants.RoleMayor:
-			return true
-		}
+	return isAgentRoleSuffix(parts[1:])
+}
+
+func isAgentRoleSuffix(parts []string) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	if isRoleOnlyAgentRole(parts[0]) {
+		return len(parts) == 1
+	}
+	if isNamedAgentRole(parts[0]) {
+		return len(parts) == 2 && parts[1] != ""
 	}
 	return false
+}
+
+func isRoleOnlyAgentRole(role string) bool {
+	switch role {
+	case constants.RoleWitness, constants.RoleRefinery, constants.RoleDeacon, constants.RoleMayor:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNamedAgentRole(role string) bool {
+	switch role {
+	case constants.RoleCrew, constants.RolePolecat:
+		return true
+	default:
+		return false
+	}
 }
 
 // ListWispIDs returns a set of all wisp IDs in the wisps table.

@@ -482,17 +482,19 @@ func (b *Beads) forIssueID(id string) *Beads {
 	if b.noRoute {
 		return b
 	}
-	resolved := ResolveBeadsDirForID(b.getResolvedBeadsDir(), id)
+	resolved := ResolveRoutingTarget(b.getTownRoot(), id, b.getResolvedBeadsDir())
 	if resolved == "" || resolved == b.getResolvedBeadsDir() {
 		return b
 	}
 	return &Beads{
-		workDir:    b.workDir,
+		workDir:    filepath.Dir(resolved),
 		beadsDir:   resolved,
 		isolated:   b.isolated,
 		serverPort: b.serverPort,
-		store:      b.store,
-		townRoot:   b.townRoot,
+		// Store instances are bound to one database; routed operations must use
+		// the resolved CLI target instead of reusing the caller's store.
+		store:    nil,
+		townRoot: b.townRoot,
 	}
 }
 
@@ -1582,6 +1584,9 @@ func normalizeBugTitle(title string) string {
 
 // Update updates an existing issue.
 func (b *Beads) Update(id string, opts UpdateOptions) error {
+	if target := b.forIssueID(id); target != b {
+		return target.Update(id, opts)
+	}
 	if b.store != nil {
 		return b.storeUpdate(id, opts)
 	}
