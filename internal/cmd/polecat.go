@@ -1343,6 +1343,8 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 	// Nuke each polecat
 	var nukeErrors []string
 	nuked := 0
+	batchPurge := !polecatNukeDryRun && len(targets) > 1
+	purgeRigs := make(map[string]*rig.Rig)
 
 	for _, p := range targets {
 		if polecatNukeDryRun {
@@ -1363,12 +1365,20 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Nuking %s/%s...\n", p.rigName, p.polecatName)
 		}
 
-		if err := nukePolecatFull(p.polecatName, p.rigName, p.mgr, p.r); err != nil {
+		if err := nukePolecatFullWithOptions(p.polecatName, p.rigName, p.mgr, p.r, nukePolecatOptions{PurgeClosedEphemerals: !batchPurge}); err != nil {
 			nukeErrors = append(nukeErrors, fmt.Sprintf("%s/%s: %v", p.rigName, p.polecatName, err))
 			continue
 		}
 
 		nuked++
+		if batchPurge {
+			purgeRigs[p.r.Path] = p.r
+		}
+	}
+	if batchPurge && len(purgeRigs) > 0 {
+		for _, r := range purgeRigs {
+			purgeClosedEphemeralBeads(beads.New(r.Path))
+		}
 	}
 
 	// Report results
@@ -1408,6 +1418,14 @@ func runPolecatNuke(cmd *cobra.Command, args []string) error {
 // 4. Close agent bead
 // This is the canonical cleanup path used by both `polecat nuke` and `polecat stale --cleanup`.
 func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.Rig) error {
+	return nukePolecatFullWithOptions(polecatName, rigName, mgr, r, nukePolecatOptions{PurgeClosedEphemerals: true})
+}
+
+type nukePolecatOptions struct {
+	PurgeClosedEphemerals bool
+}
+
+func nukePolecatFullWithOptions(polecatName, rigName string, mgr *polecat.Manager, r *rig.Rig, opts nukePolecatOptions) error {
 	t := tmux.NewTmux()
 
 	// Step 1: Kill tmux session unconditionally to prevent ghost sessions
@@ -1492,27 +1510,12 @@ func nukePolecatFull(polecatName, rigName string, mgr *polecat.Manager, r *rig.R
 		fmt.Printf("  %s remote branch preserved for refinery merge\n", style.Dim.Render("○"))
 	}
 
-	// Step 5: Reset agent bead for reuse (if exists)
-	// Uses ResetAgentBeadForReuse instead of bd close because agent beads are
-	// ephemeral (wisps table). Shelling out to `bd close` operates on the issues
-	// table and silently fails to affect wisps, leaving stale rows that block
-	// re-sling with "duplicate primary key" errors. (gt--irj)
-	// ResetAgentBeadForReuse keeps the bead open with agent_state="nuked" so
-	// CreateOrReopenAgentBead can simply update it on re-spawn without needing
-	// a close/reopen cycle.
-	agentBeadID := polecatBeadIDForRig(r, rigName, polecatName)
-	bd := beads.New(r.Path)
-	if err := bd.ForAgentBead().ResetAgentBeadForReuse(agentBeadID, "nuked"); err != nil {
-		// Bead may not exist (first spawn failed, or test environment)
-		fmt.Printf("  %s agent bead not found or already cleaned\n", style.Dim.Render("○"))
-	} else {
-		fmt.Printf("  %s closed agent bead %s\n", style.Success.Render("✓"), agentBeadID)
-	}
-
-	// Step 6: Purge closed ephemeral beads (wisps) accumulated during sessions.
+	// Step 5: Purge closed ephemeral beads (wisps) accumulated during sessions.
 	// Without this, closed wisps from mol-polecat-work steps, mol-witness-patrol
 	// cycles, etc. accumulate across sessions and pollute bd ready/list (hq-6161m).
-	purgeClosedEphemeralBeads(bd)
+	if opts.PurgeClosedEphemerals {
+		purgeClosedEphemeralBeads(beads.New(r.Path))
+	}
 
 	return nil
 }
@@ -1705,16 +1708,20 @@ func runPolecatStale(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("Cleaning up %d stale polecat(s)...\n", staleCount)
 			nuked := 0
+			batchPurge := staleCount > 1
 			for _, info := range staleInfos {
 				if !info.IsStale {
 					continue
 				}
 				fmt.Printf("Nuking %s...\n", info.Name)
-				if err := nukePolecatFull(info.Name, rigName, mgr, r); err != nil {
+				if err := nukePolecatFullWithOptions(info.Name, rigName, mgr, r, nukePolecatOptions{PurgeClosedEphemerals: !batchPurge}); err != nil {
 					fmt.Printf("  %s (%v)\n", style.Error.Render("failed"), err)
 				} else {
 					nuked++
 				}
+			}
+			if batchPurge && nuked > 0 {
+				purgeClosedEphemeralBeads(beads.New(r.Path))
 			}
 			fmt.Printf("\n%s Nuked %d stale polecat(s).\n", style.SuccessPrefix, nuked)
 
