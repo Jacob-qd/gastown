@@ -1276,10 +1276,6 @@ func findIdleMonitorProcessesFromPS(output, townRoot, absRoot string, port int) 
 		if !strings.Contains(line, "dolt") {
 			continue
 		}
-		if strings.Contains(line, "grep") {
-			continue
-		}
-
 		// Scope to this town: match by path in args using path-boundary check
 		// to avoid false matches on sibling paths (e.g., /tmp/gt matching /tmp/gt-old)
 		matchesTown := containsPathBoundary(line, absRoot) || containsPathBoundary(line, townRoot)
@@ -1304,6 +1300,9 @@ func findIdleMonitorProcessesFromPS(output, townRoot, absRoot string, port int) 
 
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
+			continue
+		}
+		if filepath.Base(fields[1]) == "grep" {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
