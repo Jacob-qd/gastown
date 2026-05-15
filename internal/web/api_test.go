@@ -63,6 +63,12 @@ func TestValidateCommand(t *testing.T) {
 			wantErr:  false,
 			wantSafe: false,
 		},
+		{
+			name:     "polecat identity add",
+			command:  "polecat identity add gastown Toast",
+			wantErr:  false,
+			wantSafe: false,
+		},
 
 		// Blocked patterns
 		{
@@ -94,6 +100,12 @@ func TestValidateCommand(t *testing.T) {
 		{
 			name:      "unknown command",
 			command:   "randomcmd foo",
+			wantErr:   true,
+			errSubstr: "not in whitelist",
+		},
+		{
+			name:      "deprecated polecat add",
+			command:   "polecat add gastown Toast",
 			wantErr:   true,
 			errSubstr: "not in whitelist",
 		},
@@ -453,6 +465,20 @@ func TestGetCommandList(t *testing.T) {
 		if cmd.Category == "" {
 			t.Errorf("Command %q has empty category", cmd.Name)
 		}
+		if cmd.Name == "polecat add" {
+			t.Error("Command list exposes deprecated polecat add")
+		}
+	}
+
+	foundIdentityAdd := false
+	for _, cmd := range commands {
+		if cmd.Name == "polecat identity add" {
+			foundIdentityAdd = true
+			break
+		}
+	}
+	if !foundIdentityAdd {
+		t.Error("Command list missing polecat identity add")
 	}
 }
 
