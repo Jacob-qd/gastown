@@ -163,8 +163,15 @@ done
 
 # Deacon issues: escalate
 if [ -n "$DEACON_ISSUE" ]; then
-  log "Escalating deacon issue: $DEACON_ISSUE"
-  gt escalate "Deacon $DEACON_ISSUE detected by stuck-agent-dog" -s HIGH 2>/dev/null || true
+	log "Escalating deacon issue: $DEACON_ISSUE"
+	DEACON_SEVERITY="HIGH"
+	case "$DEACON_ISSUE" in
+		stuck_heartbeat_*) DEACON_SEVERITY="MEDIUM" ;;
+	esac
+	gt escalate "Deacon $DEACON_ISSUE detected by stuck-agent-dog" \
+		-s "$DEACON_SEVERITY" \
+		--source "plugin:stuck-agent-dog" \
+		--fingerprint "stuck-agent-dog:deacon:$DEACON_ISSUE" 2>/dev/null || true
 fi
 
 # --- Report -------------------------------------------------------------------

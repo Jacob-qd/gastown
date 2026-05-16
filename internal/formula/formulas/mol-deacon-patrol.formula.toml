@@ -437,6 +437,12 @@ This command:
 - Auto-closes convoys where all tracked work is complete
 - Sends notifications to convoy owners
 
+If `gt convoy check` times out while `gt dolt status` is healthy, treat it as a
+control-plane wait timeout, not a Dolt outage. Escalate at MEDIUM at most and use
+a stable fingerprint such as `deacon:convoy-check:<convoy-id>` so repeated patrols
+do not create duplicate alerts. Reserve HIGH/CRITICAL for evidence that Dolt is
+unreachable or down.
+
 **Note**: Convoys support cross-prefix tracking (e.g., hq-* convoy can track gt-*, bd-* issues).
 The `gt convoy` commands handle cross-rig issue resolution automatically.
 
@@ -1210,6 +1216,12 @@ gt agent state hq-deacon --set idle=0
 **On timeout** (no activity):
 The idle counter was auto-incremented. Continue to next patrol cycle
 (the longer backoff will apply next time).
+
+`await-signal` timeout is normal idle control flow. Do not escalate it as a Dolt
+outage unless `gt dolt status` or `gt health --json` proves Dolt is unreachable.
+If an outer shell/tool timeout interrupts this command while Dolt is healthy,
+escalate at MEDIUM at most with fingerprint `deacon:await-signal:hq-deacon` and
+include the timeout, agent bead, and Dolt status in the reason.
 
 ## Effort-Based Patrol Routing
 
