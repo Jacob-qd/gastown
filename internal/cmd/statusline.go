@@ -665,6 +665,12 @@ func isSessionWorking(t *tmux.Tmux, session string) bool {
 // getMailPreviewWithRoot returns unread count and a truncated subject of the first unread message,
 // using an explicit town root.
 func getMailPreviewWithRoot(identity string, maxLen int, townRoot string) (int, string) {
+	release, ok := tryStatusDetailLock(townRoot)
+	if !ok {
+		return 0, ""
+	}
+	defer release()
+
 	// Use NewMailboxFromAddress to normalize identity (e.g., gastown/crew/gus -> gastown/gus)
 	mailbox := mail.NewMailboxFromAddress(identity, townRoot)
 
@@ -695,6 +701,13 @@ func getHookedWork(identity string, maxLen int, beadsDir string) string {
 		if err != nil {
 			return ""
 		}
+	}
+	if townRoot, err := workspace.Find(beadsDir); err == nil {
+		release, ok := tryStatusDetailLock(townRoot)
+		if !ok {
+			return ""
+		}
+		defer release()
 	}
 
 	b := beads.New(beadsDir)
