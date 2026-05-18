@@ -122,6 +122,62 @@ func TestForceCloseIssueWithRetryReturnsFinalError(t *testing.T) {
 	}
 }
 
+func TestValidateRCAIssueEvidenceRequiresPersistedReproductionNotes(t *testing.T) {
+	issue := &beads.Issue{
+		ID:          "gt-rca-example",
+		Title:       "RCA cleanup: fix behavior",
+		Description: "Reproduce/falsify current behavior before editing.",
+		Labels:      []string{"rca-backlog"},
+		Notes:       "Implemented behavior change and validation.",
+	}
+
+	err := validateRCAIssueEvidence(issue, []string{"internal/cmd/done.go"})
+	if err == nil || !strings.Contains(err.Error(), "reproduction or falsification") {
+		t.Fatalf("err = %v, want reproduction/falsification failure", err)
+	}
+}
+
+func TestValidateRCAIssueEvidenceBlocksDocsOnlyImplementation(t *testing.T) {
+	issue := &beads.Issue{
+		ID:     "gt-rca-example",
+		Title:  "RCA cleanup: fix behavior",
+		Labels: []string{"rca-needed"},
+		Notes:  "Reproduced the failure. Implemented behavior validation and tests.",
+	}
+
+	err := validateRCAIssueEvidence(issue, []string{"docs/rca.md", "README.md"})
+	if err == nil || !strings.Contains(err.Error(), "docs-only/comment-only/no-op") {
+		t.Fatalf("err = %v, want docs-only implementation failure", err)
+	}
+}
+
+func TestValidateRCAIssueEvidenceAllowsCodeEvidence(t *testing.T) {
+	issue := &beads.Issue{
+		ID:     "gt-rca-example",
+		Title:  "RCA cleanup: fix behavior",
+		Labels: []string{"rca-needed"},
+		Notes:  "Reproduced the failure. Implemented behavior change and targeted test validation.",
+	}
+
+	if err := validateRCAIssueEvidence(issue, []string{"internal/cmd/done.go", "internal/cmd/done_test.go"}); err != nil {
+		t.Fatalf("validateRCAIssueEvidence returned error: %v", err)
+	}
+}
+
+func TestValidateRCAIssueEvidencePreservesDocsOnlyTasks(t *testing.T) {
+	issue := &beads.Issue{
+		ID:          "gt-rca-docs",
+		Title:       "RCA cleanup: docs-only checklist update",
+		Description: "Explicit docs-only RCA task.",
+		Labels:      []string{"rca-needed", "docs"},
+		Notes:       "Reproduced the missing docs checklist. Validation changed documentation links.",
+	}
+
+	if err := validateRCAIssueEvidence(issue, []string{"docs/dolt-health-guide.md"}); err != nil {
+		t.Fatalf("validateRCAIssueEvidence returned error: %v", err)
+	}
+}
+
 // TestDoneBeadsInitWithoutRedirect verifies that beads initialization works
 // normally when no redirect file exists.
 func TestDoneBeadsInitWithoutRedirect(t *testing.T) {

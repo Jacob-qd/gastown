@@ -85,6 +85,107 @@ func doneContaminationBaseRef(defaultBranch, explicitTarget string) string {
 	return "origin/" + targetBranch
 }
 
+func validateRCADoneEvidence(issue *beads.Issue, g *git.Git, target, branch string) error {
+	if issue == nil || !isRCAIssue(issue) {
+		return nil
+	}
+
+	baseRef := "origin/" + strings.TrimPrefix(target, "origin/")
+	changedFiles, err := g.DiffNameOnly(baseRef, branch)
+	if err != nil {
+		return fmt.Errorf("cannot validate RCA completion evidence: %w", err)
+	}
+
+	return validateRCAIssueEvidence(issue, changedFiles)
+}
+
+func validateRCAIssueEvidence(issue *beads.Issue, changedFiles []string) error {
+	if issue == nil || !isRCAIssue(issue) {
+		return nil
+	}
+
+	docsOnly := isExplicitDocsOnlyIssue(issue)
+	notes := strings.ToLower(issue.Notes)
+	if !hasRCAReproductionEvidence(notes) {
+		return fmt.Errorf("cannot submit RCA work for %s: persisted notes must include reproduction or falsification evidence", issue.ID)
+	}
+	if !docsOnly && !hasRCAChangeEvidence(notes) {
+		return fmt.Errorf("cannot submit RCA work for %s: persisted notes must include behavior/test/config evidence", issue.ID)
+	}
+	if !docsOnly && !hasRCAImplementationEvidenceFile(changedFiles) {
+		return fmt.Errorf("cannot submit RCA work for %s: branch changes are docs-only/comment-only/no-op; RCA implementation work needs behavior, test, or config changes", issue.ID)
+	}
+
+	return nil
+}
+
+func isRCAIssue(issue *beads.Issue) bool {
+	text := strings.ToLower(issue.Title + "\n" + issue.Description)
+	if strings.Contains(text, "rca") {
+		return true
+	}
+	for _, label := range issue.Labels {
+		if strings.Contains(strings.ToLower(label), "rca") {
+			return true
+		}
+	}
+	return false
+}
+
+func isExplicitDocsOnlyIssue(issue *beads.Issue) bool {
+	text := strings.ToLower(issue.Title + "\n" + issue.Description + "\n" + issue.Notes)
+	if strings.Contains(text, "docs-only") || strings.Contains(text, "docs only") || strings.Contains(text, "documentation-only") || strings.Contains(text, "documentation only") {
+		return true
+	}
+	for _, label := range issue.Labels {
+		label = strings.ToLower(label)
+		if label == "docs" || label == "documentation" || label == "docs-only" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRCAReproductionEvidence(notes string) bool {
+	return strings.Contains(notes, "reproduc") ||
+		strings.Contains(notes, "falsif") ||
+		strings.Contains(notes, "already fixed") ||
+		strings.Contains(notes, "not reproducible")
+}
+
+func hasRCAChangeEvidence(notes string) bool {
+	for _, needle := range []string{"behavior", "test", "config", "implementation", "implemented", "validation", "changed"} {
+		if strings.Contains(notes, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRCAImplementationEvidenceFile(changedFiles []string) bool {
+	for _, file := range changedFiles {
+		file = strings.TrimSpace(file)
+		if file == "" || isDocsOnlyPath(file) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isDocsOnlyPath(path string) bool {
+	lower := strings.ToLower(path)
+	base := filepath.Base(lower)
+	if strings.HasPrefix(lower, "docs/") || strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".rst") || strings.HasSuffix(lower, ".txt") {
+		return true
+	}
+	switch base {
+	case "readme", "readme.md", "changelog", "changelog.md", "license", "license.md", "code_of_conduct.md", "contributing.md", "security.md":
+		return true
+	}
+	return false
+}
+
 func init() {
 	doneCmd.Flags().StringVar(&doneIssue, "issue", "", "Source issue ID (default: parse from branch name)")
 	doneCmd.Flags().IntVarP(&donePriority, "priority", "p", -1, "Override priority (0-4, default: inherit from issue)")
