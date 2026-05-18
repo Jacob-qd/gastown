@@ -3629,6 +3629,107 @@ func TestBuildRoutingEnv_OverridesStaleDoltPortFromBeadsDir(t *testing.T) {
 	}
 }
 
+func TestRunEnv_StripsPollutedDoltEnvAndUsesRigMetadata(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell script bd stub")
+	}
+
+	bdAllowStaleMu.Lock()
+	prevPath := bdAllowStalePath
+	prevResult := bdAllowStaleResult
+	bdAllowStaleMu.Unlock()
+	ResetBdAllowStaleCacheForTest()
+	t.Cleanup(func() {
+		bdAllowStaleMu.Lock()
+		bdAllowStalePath = prevPath
+		bdAllowStaleResult = prevResult
+		bdAllowStaleMu.Unlock()
+	})
+
+	workDir := t.TempDir()
+	beadsDir := filepath.Join(workDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	metadata := []byte(`{"backend":"dolt","dolt_mode":"server","dolt_server_host":"127.0.0.1","dolt_server_port":3307,"dolt_database":"gastown"}`)
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), metadata, 0644); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+
+	stubDir := t.TempDir()
+	logPath := filepath.Join(stubDir, "bd.log")
+	stubPath := filepath.Join(stubDir, "bd")
+	script := `#!/bin/sh
+if [ "$1" = "--allow-stale" ]; then
+  echo "Error: unknown flag: --allow-stale" >&2
+  exit 0
+fi
+{
+  printf 'BEADS_DIR=%s\n' "${BEADS_DIR:-}"
+  printf 'BEADS_DOLT_DATA_DIR=%s\n' "${BEADS_DOLT_DATA_DIR:-}"
+  printf 'BEADS_DOLT_HOST=%s\n' "${BEADS_DOLT_HOST:-}"
+  printf 'BEADS_DOLT_PORT=%s\n' "${BEADS_DOLT_PORT:-}"
+  printf 'BEADS_DOLT_SERVER_HOST=%s\n' "${BEADS_DOLT_SERVER_HOST:-}"
+  printf 'BEADS_DOLT_SERVER_PORT=%s\n' "${BEADS_DOLT_SERVER_PORT:-}"
+  printf 'BEADS_DOLT_SERVER_DATABASE=%s\n' "${BEADS_DOLT_SERVER_DATABASE:-}"
+} > "$MOCK_BD_LOG"
+if [ -n "${BEADS_DOLT_DATA_DIR:-}" ] || [ -n "${BEADS_DOLT_HOST:-}" ] || [ -n "${BEADS_DOLT_SERVER_PORT:-}" ] || [ "${BEADS_DOLT_SERVER_DATABASE:-}" = "hq" ]; then
+  printf 'hq\n'
+  exit 0
+fi
+if [ "${BEADS_DOLT_SERVER_DATABASE:-}" = "gastown" ]; then
+  printf 'gt\n'
+  exit 0
+fi
+printf 'unknown\n'
+`
+	if err := os.WriteFile(stubPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write bd stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MOCK_BD_LOG", logPath)
+	t.Setenv("BEADS_DOLT_DATA_DIR", "/home/coder/gt/.dolt-data")
+	t.Setenv("BEADS_DOLT_HOST", "127.0.0.1")
+	t.Setenv("BEADS_DOLT_PORT", "3307")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "127.0.0.1")
+	t.Setenv("BEADS_DOLT_SERVER_PORT", "3307")
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "hq")
+
+	out, err := New(workDir).Run("config", "get", "issue_prefix")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "gt" {
+		t.Fatalf("polluted env selected prefix %q, want gt", got)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read bd log: %v", err)
+	}
+	log := string(data)
+	for _, forbidden := range []string{
+		"BEADS_DOLT_DATA_DIR=/home/coder/gt/.dolt-data",
+		"BEADS_DOLT_HOST=127.0.0.1",
+		"BEADS_DOLT_SERVER_PORT=3307",
+		"BEADS_DOLT_SERVER_DATABASE=hq",
+	} {
+		if strings.Contains(log, forbidden) {
+			t.Fatalf("stale Dolt env leaked into bd subprocess (%s):\n%s", forbidden, log)
+		}
+	}
+	for _, want := range []string{
+		"BEADS_DIR=" + beadsDir,
+		"BEADS_DOLT_PORT=3307",
+		"BEADS_DOLT_SERVER_HOST=127.0.0.1",
+		"BEADS_DOLT_SERVER_DATABASE=gastown",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("bd subprocess env missing %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestIsSubprocessCrash(t *testing.T) {
 	tests := []struct {
 		name string
