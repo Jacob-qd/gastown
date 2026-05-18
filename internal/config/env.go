@@ -10,9 +10,41 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/steveyegge/gastown/internal/constants"
 )
+
+// effortPropagatedEnv is a sentinel marking that CLAUDE_CODE_EFFORT_LEVEL
+// in the current process env was set by a parent gt (not the user's shell).
+// Nested gt invocations see the sentinel and skip the deprecation notice,
+// which otherwise fires once per spawned agent on full-town boots (gt-m4lx).
+const effortPropagatedEnv = "GT_EFFORT_LEVEL_PROPAGATED"
+
+// effortDeprecationOnce ensures the CLAUDE_CODE_EFFORT_LEVEL deprecation
+// notice fires at most once per process, even when AgentEnv is called for
+// many agents in a single gt invocation.
+var effortDeprecationOnce sync.Once
+
+// maybeEmitEffortDeprecationNotice fires the deprecation notice for a
+// user-set CLAUDE_CODE_EFFORT_LEVEL at most once per process, then clears
+// both the env var and the propagation sentinel from the current process
+// env. The notice is suppressed when the sentinel is set, indicating the
+// env var was propagated by a parent gt rather than set by the user.
+func maybeEmitEffortDeprecationNotice() {
+	effortDeprecationOnce.Do(func() {
+		shellEffort := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL")
+		propagated := os.Getenv(effortPropagatedEnv) != ""
+		os.Unsetenv("CLAUDE_CODE_EFFORT_LEVEL")
+		os.Unsetenv(effortPropagatedEnv)
+		if shellEffort != "" && !propagated {
+			fmt.Fprintf(os.Stderr,
+				"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated and ignored; "+
+					"effort is resolved via role_effort in settings or `gt config cost-tier`.\n",
+				shellEffort)
+		}
+	})
+}
 
 // IdentityEnvVars are agent identity env vars that must not leak across
 // process or session boundaries. Used by daemon sanitization (clearing
@@ -209,18 +241,16 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 	if cfg.Rig != "" && cfg.TownRoot != "" {
 		rigPath = filepath.Join(cfg.TownRoot, cfg.Rig)
 	}
+	maybeEmitEffortDeprecationNotice()
 	effort := ResolveRoleEffort(cfg.Role, cfg.TownRoot, rigPath)
 	if effort == "" {
 		effort = "high"
 	}
 	env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
-	if shellEffort := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL"); shellEffort != "" {
-		fmt.Fprintf(os.Stderr,
-			"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated and ignored; "+
-				"%s effort resolved to %q via config. "+
-				"Set per-role effort with role_effort in settings or gt config cost-tier.\n",
-			shellEffort, cfg.Role, effort)
-	}
+	// Sentinel tells any nested gt process that the inherited
+	// CLAUDE_CODE_EFFORT_LEVEL came from us, not the user's shell, so it
+	// can skip the deprecation notice.
+	env[effortPropagatedEnv] = "1"
 
 	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.
 	// When gt sling is invoked from within a Claude Code session, CLAUDECODE=1

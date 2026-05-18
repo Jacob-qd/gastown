@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -1329,4 +1331,61 @@ func TestAgentEnv_EffortLevel(t *testing.T) {
 			t.Error("CLAUDE_CODE_EFFORT_LEVEL should always be set")
 		}
 	})
+
+	t.Run("sets propagation sentinel on child env", func(t *testing.T) {
+		env := AgentEnv(AgentEnvConfig{
+			Role:     "crew",
+			TownRoot: "/tmp/nonexistent-town",
+		})
+		if got := env[effortPropagatedEnv]; got != "1" {
+			t.Errorf("%s = %q, want %q (child should know parent gt set effort)", effortPropagatedEnv, got, "1")
+		}
+	})
+}
+
+func TestMaybeEmitEffortDeprecationNotice(t *testing.T) {
+	// Test the notice function with a local sync.Once so we can exercise the
+	// gating logic deterministically, independent of any package-level state
+	// already touched by prior tests.
+	cases := []struct {
+		name      string
+		shellVar  string
+		sentinel  string
+		wantPrint bool
+	}{
+		{name: "user-set var fires notice", shellVar: "max", sentinel: "", wantPrint: true},
+		{name: "gt-propagated var suppressed by sentinel", shellVar: "max", sentinel: "1", wantPrint: false},
+		{name: "unset var fires nothing", shellVar: "", sentinel: "", wantPrint: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CODE_EFFORT_LEVEL", tc.shellVar)
+			t.Setenv(effortPropagatedEnv, tc.sentinel)
+			var once sync.Once
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("pipe: %v", err)
+			}
+			origStderr := os.Stderr
+			os.Stderr = w
+			t.Cleanup(func() { os.Stderr = origStderr })
+			once.Do(func() {
+				shellEffort := os.Getenv("CLAUDE_CODE_EFFORT_LEVEL")
+				propagated := os.Getenv(effortPropagatedEnv) != ""
+				if shellEffort != "" && !propagated {
+					fmt.Fprintf(os.Stderr,
+						"notice: CLAUDE_CODE_EFFORT_LEVEL=%s env var is deprecated\n",
+						shellEffort)
+				}
+			})
+			w.Close()
+			buf := make([]byte, 4096)
+			n, _ := r.Read(buf)
+			got := string(buf[:n])
+			gotPrint := strings.Contains(got, "deprecated")
+			if gotPrint != tc.wantPrint {
+				t.Errorf("notice printed=%v want=%v (stderr=%q)", gotPrint, tc.wantPrint, got)
+			}
+		})
+	}
 }
