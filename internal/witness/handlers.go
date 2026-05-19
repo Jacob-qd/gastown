@@ -697,6 +697,37 @@ func nudgeRefinery(townRoot, rigName string) error {
 	return t.NudgeSession(sessionName, "New MR available - check merge queue for pending work")
 }
 
+var slotOpenRecoveryCheck = func(workDir, rigName, polecatName string) (string, error) {
+	return util.ExecWithOutput(workDir, "gt", "polecat", "check-recovery", rigName+"/"+polecatName, "--json")
+}
+
+func shouldNotifyMayorSlotOpen(workDir, rigName, polecatName string) (bool, string) {
+	output, err := slotOpenRecoveryCheck(workDir, rigName, polecatName)
+	if err != nil {
+		return false, fmt.Sprintf("check-recovery failed: %v", err)
+	}
+
+	var status struct {
+		Verdict  string   `json:"verdict"`
+		Blockers []string `json:"blockers,omitempty"`
+	}
+	jsonOutput := strings.TrimSpace(output)
+	if idx := strings.Index(jsonOutput, "{"); idx > 0 {
+		jsonOutput = jsonOutput[idx:]
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &status); err != nil {
+		return false, fmt.Sprintf("check-recovery json parse failed: %v", err)
+	}
+	if status.Verdict != "SAFE_TO_NUKE" {
+		reason := "check-recovery verdict=" + status.Verdict
+		if len(status.Blockers) > 0 {
+			reason += " blockers=" + strings.Join(status.Blockers, ";")
+		}
+		return false, reason
+	}
+	return true, ""
+}
+
 // notifyMayorSlotOpen nudges the Mayor that a polecat slot is now open.
 // This is critical for pipeline throughput: without it, the Mayor sits idle
 // even when open beads exist, because it never learns about the completion.
@@ -705,6 +736,10 @@ func nudgeRefinery(townRoot, rigName string) error {
 func notifyMayorSlotOpen(workDir, rigName, polecatName, exitType string) {
 	townRoot, _ := workspace.Find(workDir)
 	if townRoot == "" {
+		return
+	}
+	if ok, reason := shouldNotifyMayorSlotOpen(workDir, rigName, polecatName); !ok {
+		fmt.Fprintf(os.Stderr, "witness: suppressing SLOT_OPEN for %s/%s: %s\n", rigName, polecatName, reason)
 		return
 	}
 
