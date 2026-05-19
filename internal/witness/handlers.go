@@ -2327,6 +2327,7 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 	// This prevents the witness→deacon→spawn feedback loop from creating
 	// unbounded polecats when a task repeatedly kills its polecat.
 	if ShouldBlockRespawn(workDir, hookBead) {
+		respawnSummary := BeadRespawnSummary(workDir, hookBead)
 		if router != nil {
 			msg := &mail.Message{
 				From:     fmt.Sprintf("%s/witness", rigName),
@@ -2338,17 +2339,18 @@ Re-dispatch blocked to prevent spawn storm.
 
 Polecat: %s/%s
 Previous Status: %s
+Recent Attempts: %s
 
 Action required: investigate why this task keeps killing its polecat,
 then either close the bead or reset the respawn counter.`,
-					hookBead, maxRespawns, rigName, polecatName, status),
+					hookBead, maxRespawns, rigName, polecatName, status, respawnSummary),
 			}
 			if err := router.Send(msg); err != nil {
 				fmt.Fprintf(os.Stderr, "witness: failed to send SPAWN_BLOCKED mail for %s: %v, attempting nudge fallback\n", hookBead, err)
 				// Nudge mayor as fallback — nudges are more reliable than mail
 				t := tmux.NewTmux()
-				nudgeMsg := fmt.Sprintf("SPAWN_BLOCKED %s (respawn limit reached) from %s/%s — mail send failed, investigate spawn storm",
-					hookBead, rigName, polecatName)
+				nudgeMsg := fmt.Sprintf("SPAWN_BLOCKED %s (respawn limit reached) from %s/%s — mail send failed, investigate spawn storm; %s",
+					hookBead, rigName, polecatName, respawnSummary)
 				if nudgeErr := t.NudgeSession(session.MayorSessionName(), nudgeMsg); nudgeErr != nil {
 					fmt.Fprintf(os.Stderr, "witness: nudge fallback to mayor also failed for %s: %v\n", hookBead, nudgeErr)
 				}

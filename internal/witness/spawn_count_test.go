@@ -3,6 +3,7 @@ package witness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -109,5 +110,25 @@ func TestShouldBlockRespawn_UnknownBead(t *testing.T) {
 
 	if ShouldBlockRespawn(tmpDir, "nonexistent") {
 		t.Error("ShouldBlockRespawn = true for unknown bead")
+	}
+}
+
+func TestBeadRespawnSummary(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "witness"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := BeadRespawnSummary(tmpDir, "missing"); got != "respawn_count=0 last_respawn=never" {
+		t.Fatalf("missing summary = %q", got)
+	}
+
+	RecordBeadRespawn(tmpDir, "bead-4")
+	RecordBeadRespawn(tmpDir, "bead-4")
+	got := BeadRespawnSummary(tmpDir, "bead-4")
+	for _, want := range []string{"respawn_count=2", "last_respawn="} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary %q missing %q", got, want)
+		}
 	}
 }

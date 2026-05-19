@@ -92,6 +92,33 @@ func ShouldBlockRespawn(workDir, beadID string) bool {
 	return rec.Count >= maxRespawns
 }
 
+// BeadRespawnSummary returns operator-facing context for a bead's respawn ledger.
+func BeadRespawnSummary(workDir, beadID string) string {
+	respawnMu.Lock()
+	defer respawnMu.Unlock()
+
+	townRoot, err := workspace.Find(workDir)
+	if err != nil || townRoot == "" {
+		townRoot = workDir
+	}
+
+	unlock, flockErr := lock.FlockAcquire(beadRespawnStateFile(townRoot) + ".flock")
+	if flockErr == nil {
+		defer unlock()
+	}
+
+	state := loadBeadRespawnState(townRoot)
+	rec, ok := state.Beads[beadID]
+	if !ok {
+		return "respawn_count=0 last_respawn=never"
+	}
+	lastRespawn := "never"
+	if !rec.LastRespawn.IsZero() {
+		lastRespawn = rec.LastRespawn.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("respawn_count=%d last_respawn=%s", rec.Count, lastRespawn)
+}
+
 // RecordBeadRespawn increments the respawn count for beadID and returns the new count.
 // workDir is the rig path; townRoot is resolved internally via workspace.Find.
 // On state file errors the count is still incremented in memory and returned, so the
