@@ -80,8 +80,9 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 	var missingRedirects []redirectIssue
 	var incorrectRedirects []redirectIssue
 
-	// Get list of rigs to scan
-	rigDirs, err := findRigDirs(ctx.TownRoot)
+	// Get list of rigs to scan. In --rig mode, keep this check scoped so
+	// cleanup/fix output does not include unrelated rigs.
+	rigDirs, err := staleRedirectRigDirs(ctx)
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -148,6 +149,17 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 		Details: details,
 		FixHint: "Run 'gt doctor --fix' to repair redirects and remove stale files",
 	}
+}
+
+func staleRedirectRigDirs(ctx *CheckContext) ([]string, error) {
+	if ctx.RigName != "" {
+		rigDir := filepath.Join(ctx.TownRoot, ctx.RigName)
+		if !isLikelyRig(rigDir) {
+			return nil, nil
+		}
+		return []string{rigDir}, nil
+	}
+	return findRigDirs(ctx.TownRoot)
 }
 
 // Fix removes stale files from .beads directories that have redirects,

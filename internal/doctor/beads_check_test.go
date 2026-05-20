@@ -448,6 +448,47 @@ func TestDatabasePrefixCheck_DetectsMismatchForOwnDB(t *testing.T) {
 	}
 }
 
+func TestDatabasePrefixCheck_RigNameScopesRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"do-","path":"coder_dotfiles/mayor/rig"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, routePath := range []string{"gastown/mayor/rig/.beads", "coder_dotfiles/mayor/rig/.beads"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, routePath), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "gastown", "mayor", "rig"):        "gt",
+			filepath.Join(tmpDir, "coder_dotfiles", "mayor", "rig"): "hq",
+		},
+	}
+
+	result := check.Run(&CheckContext{TownRoot: tmpDir, RigName: "gastown"})
+	if result.Status != StatusOK {
+		t.Fatalf("expected scoped gastown check to ignore other rig mismatch, got %v: %s details=%v", result.Status, result.Message, result.Details)
+	}
+	if len(check.mismatches) != 0 {
+		t.Fatalf("expected no scoped mismatches, got %+v", check.mismatches)
+	}
+
+	result = check.Run(&CheckContext{TownRoot: tmpDir})
+	if result.Status != StatusWarning {
+		t.Fatalf("expected unscoped check to detect other rig mismatch, got %v: %s details=%v", result.Status, result.Message, result.Details)
+	}
+}
+
 func TestDatabasePrefixCheck_UsesMetadataDatabaseEnv(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake bd stub is shell-specific")
