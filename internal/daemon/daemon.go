@@ -3041,7 +3041,7 @@ func (d *Daemon) dispatchQueuedWork() {
 	cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
 	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
-	cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
+	cmd.Env = append(beads.BuildMutationRoutingBDEnv(os.Environ(), filepath.Join(d.config.TownRoot, ".beads")), "GT_DAEMON=1")
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		d.logger.Printf("Scheduler dispatch timed out after 5m")

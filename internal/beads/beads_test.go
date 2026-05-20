@@ -201,12 +201,13 @@ func TestSuppressBDSideEffectsOverridesInherited(t *testing.T) {
 	})
 	got := envMap(env)
 	for key, want := range map[string]string{
-		"BD_EXPORT_AUTO":    "false",
-		"BD_BACKUP_ENABLED": "false",
-		"BD_DOLT_AUTO_PUSH": "false",
-		"BD_NO_PUSH":        "true",
-		"BD_EXPORT_GIT_ADD": "false",
-		"BD_NO_GIT_OPS":     "true",
+		"BEADS_NO_AUTO_IMPORT": "1",
+		"BD_EXPORT_AUTO":       "false",
+		"BD_BACKUP_ENABLED":    "false",
+		"BD_DOLT_AUTO_PUSH":    "false",
+		"BD_NO_PUSH":           "true",
+		"BD_EXPORT_GIT_ADD":    "false",
+		"BD_NO_GIT_OPS":        "true",
 	} {
 		if got[key] != want {
 			t.Fatalf("%s = %q, want %q in %v", key, got[key], want, env)

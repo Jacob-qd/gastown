@@ -209,15 +209,15 @@ func TestBdSubprocessEnv_SuppressesAutoImport(t *testing.T) {
 	}
 }
 
-func TestBdSubprocessEnv_ExtraEnvAppendedAfterCanonical(t *testing.T) {
+func TestBdSubprocessEnv_ExtraEnvCannotOverrideCanonicalPolicy(t *testing.T) {
 	got := bdSubprocessEnv(nil, "/tmp/.beads", true, []string{"BEADS_NO_AUTO_IMPORT=0"})
 
 	value, ok := envLastValue(got, "BEADS_NO_AUTO_IMPORT")
 	if !ok {
 		t.Fatalf("expected BEADS_NO_AUTO_IMPORT in env, got %v", got)
 	}
-	if value != "0" {
-		t.Fatalf("expected extra env override to win, got BEADS_NO_AUTO_IMPORT=%s in %v", value, got)
+	if value != "1" {
+		t.Fatalf("expected canonical env to win, got BEADS_NO_AUTO_IMPORT=%s in %v", value, got)
 	}
 }
 
@@ -263,7 +263,7 @@ func TestBdSubprocessEnv_FiltersStaleBdTargetEnv(t *testing.T) {
 	if !envContains(got, "BEADS_DOLT_SERVER_DATABASE=rigdb") {
 		t.Fatalf("expected metadata database env in env, got %v", got)
 	}
-	for _, want := range []string{"BD_READONLY=true", "BD_EXPORT_AUTO=false", "BD_BACKUP_ENABLED=false", "BD_DOLT_AUTO_PUSH=false", "BD_NO_PUSH=true", "BD_EXPORT_GIT_ADD=false", "BD_NO_GIT_OPS=true"} {
+	for _, want := range []string{"BD_READONLY=true", "BD_DOLT_AUTO_COMMIT=off", "BD_EXPORT_AUTO=false", "BD_BACKUP_ENABLED=false", "BD_DOLT_AUTO_PUSH=false", "BD_NO_PUSH=true", "BD_EXPORT_GIT_ADD=false", "BD_NO_GIT_OPS=true"} {
 		if !envContains(got, want) {
 			t.Fatalf("expected %s in env, got %v", want, got)
 		}
@@ -275,7 +275,7 @@ func TestBdSubprocessEnv_WriteCommandsAreNotReadonly(t *testing.T) {
 	if value, ok := envLastValue(got, "BD_READONLY"); ok {
 		t.Fatalf("write command env should not inherit or set BD_READONLY, got %q in %v", value, got)
 	}
-	for _, want := range []string{"BD_EXPORT_AUTO=false", "BD_BACKUP_ENABLED=false", "BD_DOLT_AUTO_PUSH=false", "BD_NO_PUSH=true", "BD_EXPORT_GIT_ADD=false", "BD_NO_GIT_OPS=true"} {
+	for _, want := range []string{"BD_DOLT_AUTO_COMMIT=on", "BD_EXPORT_AUTO=false", "BD_BACKUP_ENABLED=false", "BD_DOLT_AUTO_PUSH=false", "BD_NO_PUSH=true", "BD_EXPORT_GIT_ADD=false", "BD_NO_GIT_OPS=true"} {
 		if !envContains(got, want) {
 			t.Fatalf("expected %s in env, got %v", want, got)
 		}

@@ -120,21 +120,19 @@ func firstArg(args []string) string {
 }
 
 func bdSubprocessEnv(baseEnv []string, beadsDir string, readOnly bool, extraEnv []string) []string {
-	var env []string
-	if beadsDir == "" {
-		env = beads.BuildRoutingBDEnv(baseEnv, "")
-	} else {
-		env = beads.BuildPinnedBDEnv(baseEnv, beadsDir)
-	}
-	env = filterEnvKey(env, "BD_READONLY")
-	extraEnv = filterEnvKey(extraEnv, "BD_READONLY")
-	env = append(env, "BEADS_NO_AUTO_IMPORT=1")
-	env = beads.SuppressBDSideEffects(env)
-	env = append(env, extraEnv...)
+	base := append(append([]string{}, baseEnv...), extraEnv...)
+	mode := beads.MutationRouting
 	if readOnly {
-		env = filterEnvKey(env, "BD_READONLY")
-		env = append(env, "BD_READONLY=true")
+		mode = beads.ReadOnlyRouting
 	}
+	if beadsDir != "" {
+		if readOnly {
+			mode = beads.ReadOnlyPinned
+		} else {
+			mode = beads.MutationPinned
+		}
+	}
+	env := beads.EnvForSubprocessMode(base, beadsDir, mode)
 	env = append(env, telemetry.OTELEnvForSubprocess()...)
 	return env
 }

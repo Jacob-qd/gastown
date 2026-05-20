@@ -152,6 +152,7 @@ func stripBDCommandFlags(args []string) []string {
 // checks and can create a self-feeding Dolt load loop.
 func SuppressBDSideEffects(env []string) []string {
 	for _, key := range []string{
+		"BEADS_NO_AUTO_IMPORT",
 		"BD_EXPORT_AUTO",
 		"BD_BACKUP_ENABLED",
 		"BD_DOLT_AUTO_PUSH",
@@ -162,6 +163,7 @@ func SuppressBDSideEffects(env []string) []string {
 		env = stripEnvKey(env, key)
 	}
 	return append(env,
+		"BEADS_NO_AUTO_IMPORT=1",
 		"BD_EXPORT_AUTO=false",
 		"BD_BACKUP_ENABLED=false",
 		"BD_DOLT_AUTO_PUSH=false",
