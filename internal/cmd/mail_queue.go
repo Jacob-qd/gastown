@@ -86,6 +86,16 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 
 	// List unclaimed messages in the queue
 	// Queue messages have queue:<name> label and no claimed-by label
+	processing, err := countProcessingQueueMessages(beadsDir, queueName)
+	if err != nil {
+		return fmt.Errorf("checking queue capacity: %w", err)
+	}
+	if !queueAllowsClaim(queueFields, processing) {
+		fmt.Printf("%s Queue %s at capacity (%d/%d processing)\n",
+			style.Dim.Render("○"), queueName, processing, queueFields.MaxConcurrency)
+		return nil
+	}
+
 	messages, err := listUnclaimedQueueMessages(beadsDir, queueName)
 	if err != nil {
 		return fmt.Errorf("listing queue messages: %w", err)
@@ -117,6 +127,20 @@ func runMailClaim(cmd *cobra.Command, args []string) error {
 		}
 
 		if info.ClaimedBy == caller {
+			processing, err := countProcessingQueueMessages(beadsDir, queueName)
+			if err != nil {
+				_ = releaseQueueMessage(beadsDir, candidate.ID, caller)
+				return fmt.Errorf("verifying queue capacity: %w", err)
+			}
+			if queueExceededCapacity(queueFields, processing) {
+				if releaseErr := releaseQueueMessage(beadsDir, candidate.ID, caller); releaseErr != nil {
+					style.PrintWarning("could not release over-capacity claim on %s: %v", candidate.ID, releaseErr)
+				}
+				fmt.Printf("%s Queue %s at capacity (%d/%d processing)\n",
+					style.Dim.Render("○"), queueName, processing-1, queueFields.MaxConcurrency)
+				return nil
+			}
+
 			// Delivery ack runs after claim verification so only the
 			// winning claimant writes ack labels. Non-fatal: the claim
 			// itself already succeeded.
@@ -170,9 +194,53 @@ type queueMessage struct {
 	ClaimedAt   *time.Time
 }
 
+func queueAllowsClaim(fields *beads.QueueFields, processing int) bool {
+	return fields == nil || fields.MaxConcurrency <= 0 || processing < fields.MaxConcurrency
+}
+
+func queueExceededCapacity(fields *beads.QueueFields, processing int) bool {
+	return fields != nil && fields.MaxConcurrency > 0 && processing > fields.MaxConcurrency
+}
+
 // listUnclaimedQueueMessages lists unclaimed messages in a queue.
 // Unclaimed messages have queue:<name> label but no claimed-by label.
 func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, error) {
+	messages, err := listQueueMessages(beadsDir, queueName)
+	if err != nil {
+		return nil, err
+	}
+
+	var unclaimed []queueMessage
+	for _, msg := range messages {
+		// Only include unclaimed messages - check both ClaimedBy and ClaimedAt
+		// to handle orphaned claimed-at labels from interrupted releases
+		if msg.ClaimedBy == "" && msg.ClaimedAt == nil {
+			unclaimed = append(unclaimed, msg)
+		}
+	}
+
+	return unclaimed, nil
+}
+
+func countProcessingQueueMessages(beadsDir, queueName string) (int, error) {
+	messages, err := listQueueMessages(beadsDir, queueName)
+	if err != nil {
+		return 0, err
+	}
+	return countProcessingMessages(messages), nil
+}
+
+func countProcessingMessages(messages []queueMessage) int {
+	processing := 0
+	for _, msg := range messages {
+		if msg.ClaimedBy != "" || msg.ClaimedAt != nil {
+			processing++
+		}
+	}
+	return processing
+}
+
+func listQueueMessages(beadsDir, queueName string) ([]queueMessage, error) {
 	// Use bd list to find messages with queue:<name> label and status=open
 	args := []string{"list",
 		"--label", "queue:" + queueName,
@@ -215,7 +283,7 @@ func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, err
 		return nil, fmt.Errorf("parsing bd output: %w", err)
 	}
 
-	// Convert to queueMessage, filtering out already claimed messages
+	// Convert to queueMessage.
 	var messages []queueMessage
 	for _, issue := range issues {
 		msg := queueMessage{
@@ -239,11 +307,7 @@ func listUnclaimedQueueMessages(beadsDir, queueName string) ([]queueMessage, err
 				}
 			}
 		}
-		// Only include unclaimed messages - check both ClaimedBy and ClaimedAt
-		// to handle orphaned claimed-at labels from interrupted releases
-		if msg.ClaimedBy == "" && msg.ClaimedAt == nil {
-			messages = append(messages, msg)
-		}
+		messages = append(messages, msg)
 	}
 
 	// Sort by created time (oldest first) for FIFO ordering

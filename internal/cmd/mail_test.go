@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
@@ -183,6 +184,77 @@ func validateQueueRelease(msgInfo *queueMessageInfo, caller string) error {
 	}
 
 	return nil
+}
+
+func TestQueueClaimCapacity(t *testing.T) {
+	tests := []struct {
+		name       string
+		fields     *beads.QueueFields
+		processing int
+		wantAllow  bool
+		wantExceed bool
+	}{
+		{
+			name:       "nil fields allow",
+			fields:     nil,
+			processing: 100,
+			wantAllow:  true,
+			wantExceed: false,
+		},
+		{
+			name:       "zero max means unlimited",
+			fields:     &beads.QueueFields{MaxConcurrency: 0},
+			processing: 100,
+			wantAllow:  true,
+			wantExceed: false,
+		},
+		{
+			name:       "below capacity allows",
+			fields:     &beads.QueueFields{MaxConcurrency: 2},
+			processing: 1,
+			wantAllow:  true,
+			wantExceed: false,
+		},
+		{
+			name:       "at capacity blocks next claim",
+			fields:     &beads.QueueFields{MaxConcurrency: 2},
+			processing: 2,
+			wantAllow:  false,
+			wantExceed: false,
+		},
+		{
+			name:       "over capacity releases raced claim",
+			fields:     &beads.QueueFields{MaxConcurrency: 2},
+			processing: 3,
+			wantAllow:  false,
+			wantExceed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := queueAllowsClaim(tt.fields, tt.processing); got != tt.wantAllow {
+				t.Errorf("queueAllowsClaim() = %v, want %v", got, tt.wantAllow)
+			}
+			if got := queueExceededCapacity(tt.fields, tt.processing); got != tt.wantExceed {
+				t.Errorf("queueExceededCapacity() = %v, want %v", got, tt.wantExceed)
+			}
+		})
+	}
+}
+
+func TestCountProcessingMessages(t *testing.T) {
+	now := time.Now()
+	messages := []queueMessage{
+		{ID: "unclaimed"},
+		{ID: "claimed-by", ClaimedBy: "gastown/polecats/nux"},
+		{ID: "claimed-at", ClaimedAt: &now},
+		{ID: "claimed-both", ClaimedBy: "gastown/polecats/max", ClaimedAt: &now},
+	}
+
+	if got := countProcessingMessages(messages); got != 3 {
+		t.Errorf("countProcessingMessages() = %d, want 3", got)
+	}
 }
 
 // TestMailAnnounces tests the announces command functionality.
