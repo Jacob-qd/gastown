@@ -80,13 +80,18 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 	var missingRedirects []redirectIssue
 	var incorrectRedirects []redirectIssue
 
-	// Get list of rigs to scan
-	rigDirs, err := findRigDirs(ctx.TownRoot)
-	if err != nil {
-		return &CheckResult{
-			Name:    c.Name(),
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not scan rigs: %v", err),
+	// Get list of rigs to scan. With --rig, keep detection and fixes scoped to
+	// the requested rig instead of repairing unrelated workspace state.
+	rigDirs := []string{ctx.RigPath()}
+	if ctx.RigName == "" {
+		var err error
+		rigDirs, err = findRigDirs(ctx.TownRoot)
+		if err != nil {
+			return &CheckResult{
+				Name:    c.Name(),
+				Status:  StatusWarning,
+				Message: fmt.Sprintf("Could not scan rigs: %v", err),
+			}
 		}
 	}
 

@@ -420,6 +420,9 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		if route.Path == "." || route.Path == "" {
 			continue
 		}
+		if ctx.RigName != "" && !routePathMatchesRig(route.Path, ctx.RigName) {
+			continue
+		}
 
 		rigPath := filepath.Join(ctx.TownRoot, route.Path)
 		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
@@ -502,4 +505,10 @@ func (c *DatabasePrefixCheck) Fix(ctx *CheckContext) error {
 	}
 
 	return nil
+}
+
+func routePathMatchesRig(routePath, rigName string) bool {
+	cleanRoute := strings.Trim(filepath.ToSlash(filepath.Clean(routePath)), "/")
+	cleanRig := strings.Trim(filepath.ToSlash(filepath.Clean(rigName)), "/")
+	return cleanRoute == cleanRig || strings.HasPrefix(cleanRoute, cleanRig+"/")
 }
