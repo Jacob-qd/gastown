@@ -626,28 +626,12 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 		result.MRClosed = true
 	}
 
-	// Close the source issue with reason and --force to bypass dependency checks.
-	// The source issue may have an attached molecule (wisp) whose open steps
-	// would block a normal bd close. ForceCloseWithReason bypasses this,
-	// matching how gt done handles closures for the no-MR path.
-	if mr.IssueID != "" {
-		closeReason := fmt.Sprintf("Merged in %s", mr.ID)
-		if mr.MergeCommit != "" {
-			closeReason = fmt.Sprintf("%s\ntarget_branch: %s\ncommit_sha: %s", closeReason, mr.TargetBranch, mr.MergeCommit)
-		}
-		if err := b.ForceCloseWithReason(closeReason, mr.IssueID); err != nil {
-			// Check if already closed (by polecat's gt done) — that's fine
-			if issue, showErr := b.Show(mr.IssueID); showErr == nil && beads.IssueStatus(issue.Status).IsTerminal() {
-				_, _ = fmt.Fprintf(m.output, "  %s source issue already closed: %s\n", style.Dim.Render("○"), mr.IssueID)
-				result.SourceIssueClosed = true
-			} else {
-				_, _ = fmt.Fprintf(m.output, "  %s source issue close: %v\n", style.Dim.Render("○"), err)
-				result.SourceIssueNotFound = true
-			}
-		} else {
-			result.SourceIssueClosed = true
-		}
-	}
+	// Close the source issue with --force to bypass dependency checks. If the
+	// source is a slingable alias, also close its bead-valued external_ref only
+	// after the source close succeeds so failed/unmerged MRs remain lossless.
+	result.SourceIssueClosed, result.SourceIssueNotFound = closeMergedSourceIssue(
+		b, m.output, mr.IssueID, mr.ID, mr.TargetBranch, mr.MergeCommit, "  "+style.Dim.Render("○"),
+	)
 
 	return result, nil
 }

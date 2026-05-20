@@ -192,6 +192,7 @@ type Issue struct {
 	BlockedBy   []string `json:"blocked_by,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 	Ephemeral   bool     `json:"ephemeral,omitempty"` // Wisp/ephemeral issues, not synced to git
+	ExternalRef string   `json:"external_ref,omitempty"`
 
 	// Content fields (parsed from bd show --json)
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
@@ -308,6 +309,7 @@ type CreateOptions struct {
 	Actor       string // Who is creating this issue (populates created_by)
 	Ephemeral   bool   // Create as ephemeral (wisp) - not synced to git
 	Rig         string // Target rig database (e.g., "gantry"). When set, binds create to the rig's .beads directory.
+	ExternalRef string // External reference, usually an original bead for slingable aliases.
 }
 
 // UpdateOptions specifies options for updating an issue.
@@ -1414,7 +1416,7 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 		return bdForCreate.Create(opts)
 	}
 
-	if b.store != nil && !opts.Ephemeral {
+	if b.store != nil && !opts.Ephemeral && opts.ExternalRef == "" {
 		return b.storeCreate(opts)
 	}
 
@@ -1442,6 +1444,9 @@ func (b *Beads) Create(opts CreateOptions) (*Issue, error) {
 	}
 	if opts.Ephemeral {
 		args = append(args, "--ephemeral")
+	}
+	if opts.ExternalRef != "" {
+		args = append(args, "--external-ref="+opts.ExternalRef)
 	}
 	// Default Actor from BD_ACTOR env var if not specified
 	// Uses getActor() to respect isolated mode (tests)

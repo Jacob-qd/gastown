@@ -277,6 +277,65 @@ func TestManager_PostMerge_ClosesMRAndSourceIssue(t *testing.T) {
 	}
 }
 
+func TestManager_PostMerge_ClosesSourceExternalRefAlias(t *testing.T) {
+	mgr, rigPath := setupTestManager(t)
+	testutil.RequireDoltContainer(t)
+	port, _ := strconv.Atoi(testutil.DoltContainerPort())
+	b := beads.NewIsolatedWithPort(rigPath, port)
+	if err := b.Init("gt"); err != nil {
+		t.Skipf("bd init unavailable: %v", err)
+	}
+
+	original, err := b.Create(beads.CreateOptions{
+		Title: "Original RCA issue",
+		Type:  "bug",
+	})
+	if err != nil {
+		t.Fatalf("create original issue: %v", err)
+	}
+	alias, err := b.Create(beads.CreateOptions{
+		Title:       "Slingable RCA alias",
+		Type:        "bug",
+		ExternalRef: original.ID,
+	})
+	if err != nil {
+		t.Fatalf("create alias issue: %v", err)
+	}
+
+	mrDesc := "branch: polecat/test/gt-alias\nsource_issue: " + alias.ID + "\nworker: test\ntarget: main"
+	mrIssue, err := b.Create(beads.CreateOptions{
+		Title:       "MR for alias cleanup",
+		Labels:      []string{"gt:merge-request"},
+		Description: mrDesc,
+	})
+	if err != nil {
+		t.Fatalf("create MR issue: %v", err)
+	}
+
+	result, err := mgr.PostMerge(mrIssue.ID)
+	if err != nil {
+		t.Fatalf("PostMerge() error: %v", err)
+	}
+	if !result.SourceIssueClosed {
+		t.Fatal("PostMerge() SourceIssueClosed = false, want true")
+	}
+
+	closedAlias, err := b.Show(alias.ID)
+	if err != nil {
+		t.Fatalf("show closed alias: %v", err)
+	}
+	if !beads.IssueStatus(closedAlias.Status).IsTerminal() {
+		t.Fatalf("alias status = %s, want terminal", closedAlias.Status)
+	}
+	closedOriginal, err := b.Show(original.ID)
+	if err != nil {
+		t.Fatalf("show closed original: %v", err)
+	}
+	if !beads.IssueStatus(closedOriginal.Status).IsTerminal() {
+		t.Fatalf("original status = %s, want terminal", closedOriginal.Status)
+	}
+}
+
 func TestManager_PostMerge_AlreadyClosedMR(t *testing.T) {
 	mgr, rigPath := setupTestManager(t)
 	testutil.RequireDoltContainer(t)
