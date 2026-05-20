@@ -205,7 +205,7 @@ func TestRigConfigSyncCheck_FixDisablesRigAutoExport(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("prefix: tr\nissue-prefix: tr\nexport.auto: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"dolt_mode":"embedded"}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"backend":"dolt","dolt_mode":"embedded","dolt_database":"testrig"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,6 +223,13 @@ func TestRigConfigSyncCheck_FixDisablesRigAutoExport(t *testing.T) {
 	}
 	if len(check.missingExportCfg) != 1 || check.missingExportCfg[0] != "testrig" {
 		t.Fatalf("missingExportCfg = %#v, want [testrig]", check.missingExportCfg)
+	}
+	details := strings.Join(result.Details, "\n")
+	if !strings.Contains(details, filepath.Join(beadsDir, "config.yaml")) {
+		t.Fatalf("details missing config path: %v", result.Details)
+	}
+	if !strings.Contains(details, "dolt_database=testrig") {
+		t.Fatalf("details missing metadata database: %v", result.Details)
 	}
 
 	if err := check.Fix(ctx); err != nil {

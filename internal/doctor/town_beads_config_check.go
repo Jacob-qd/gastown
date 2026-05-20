@@ -1,9 +1,11 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/beads"
 )
@@ -56,7 +58,7 @@ func (c *TownBeadsConfigCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:     c.Name(),
 			Status:   StatusError,
 			Message:  "Missing town .beads/config.yaml",
-			Details:  []string{"Fix will create config.yaml without modifying existing metadata or configs."},
+			Details:  []string{fmt.Sprintf("Config: %s", configPath), beadsMetadataDetails(beadsDir), "Fix will create config.yaml without modifying existing metadata or configs."},
 			FixHint:  "Run 'gt doctor --fix' to create config.yaml",
 			Category: c.CheckCategory,
 		}
@@ -75,7 +77,7 @@ func (c *TownBeadsConfigCheck) Run(ctx *CheckContext) *CheckResult {
 			Name:     c.Name(),
 			Status:   StatusWarning,
 			Message:  "Town beads config.yaml must disable export.auto",
-			Details:  []string{"Fix will set export.auto: \"false\" to prevent non-actionable bd auto-export git-add warnings in server-mode runtime beads dirs."},
+			Details:  []string{fmt.Sprintf("Config: %s", configPath), beadsMetadataDetails(beadsDir), "Fix will set export.auto: \"false\" to prevent non-actionable bd auto-export git-add warnings in server-mode runtime beads dirs."},
 			FixHint:  "Run 'gt doctor --fix' to repair config.yaml",
 			Category: c.CheckCategory,
 		}
@@ -104,4 +106,37 @@ func (c *TownBeadsConfigCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
 	prefix := beads.ConfigDefaultsFromMetadata(beadsDir, "hq")
 	return beads.EnsureConfigYAML(beadsDir, prefix)
+}
+
+func beadsMetadataDetails(beadsDir string) string {
+	metadataPath := filepath.Join(beadsDir, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return fmt.Sprintf("Metadata: %s unavailable: %v", metadataPath, err)
+	}
+
+	var metadata struct {
+		Backend      string `json:"backend"`
+		DoltMode     string `json:"dolt_mode"`
+		DoltDatabase string `json:"dolt_database"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return fmt.Sprintf("Metadata: %s invalid: %v", metadataPath, err)
+	}
+
+	var parts []string
+	if metadata.Backend != "" {
+		parts = append(parts, "backend="+metadata.Backend)
+	}
+	if metadata.DoltMode != "" {
+		parts = append(parts, "dolt_mode="+metadata.DoltMode)
+	}
+	if metadata.DoltDatabase != "" {
+		parts = append(parts, "dolt_database="+metadata.DoltDatabase)
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("Metadata: %s has no backend/dolt fields", metadataPath)
+	}
+
+	return fmt.Sprintf("Metadata: %s (%s)", metadataPath, strings.Join(parts, ", "))
 }

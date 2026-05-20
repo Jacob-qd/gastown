@@ -151,7 +151,7 @@ func (c *RigConfigSyncCheck) Run(ctx *CheckContext) *CheckResult {
 			}
 			if !beads.ConfigYAMLDisablesAutoExport(content) {
 				c.missingExportCfg = append(c.missingExportCfg, rigName)
-				details = append(details, fmt.Sprintf("Rig %s .beads/config.yaml must disable export.auto", rigName))
+				details = append(details, fmt.Sprintf("Rig %s .beads/config.yaml must disable export.auto (config: %s; %s)", rigName, configYamlPath, beadsMetadataDetails(beadsDir)))
 			}
 		}
 
