@@ -652,3 +652,52 @@ func TestDatabasePrefixCheck_MixedOwnAndRedirect(t *testing.T) {
 		t.Errorf("expected mismatch for mission_manager, got %s", check.mismatches[0].rigPath)
 	}
 }
+
+func TestDatabasePrefixCheck_RigScopedRoutes(t *testing.T) {
+	tmpDir := t.TempDir()
+	townBeads := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(townBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"."}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"do-","path":"coder_dotfiles/mayor/rig"}`
+	if err := os.WriteFile(filepath.Join(townBeads, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rigPath := range []string{
+		filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads"),
+		filepath.Join(tmpDir, "coder_dotfiles", "mayor", "rig", ".beads"),
+	} {
+		if err := os.MkdirAll(rigPath, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mock := &mockDBPrefixGetter{
+		prefixes: map[string]string{
+			filepath.Join(tmpDir, "gastown", "mayor", "rig"):        "wrong-gt",
+			filepath.Join(tmpDir, "coder_dotfiles", "mayor", "rig"): "wrong-do",
+		},
+	}
+	check := NewDatabasePrefixCheck()
+	check.prefixGetter = mock
+
+	result := check.Run(&CheckContext{TownRoot: tmpDir, RigName: "gastown"})
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning for scoped mismatch, got %v: %s", result.Status, result.Message)
+	}
+	if len(check.mismatches) != 1 {
+		t.Fatalf("expected 1 scoped mismatch, got %d: %+v", len(check.mismatches), check.mismatches)
+	}
+	if check.mismatches[0].rigPath != "gastown/mayor/rig" {
+		t.Fatalf("expected gastown route only, got %+v", check.mismatches[0])
+	}
+	for _, detail := range result.Details {
+		if strings.Contains(detail, "coder_dotfiles") {
+			t.Fatalf("unscoped route leaked into details: %v", result.Details)
+		}
+	}
+}

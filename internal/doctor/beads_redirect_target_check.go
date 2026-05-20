@@ -45,7 +45,7 @@ func NewBeadsRedirectTargetCheck() *BeadsRedirectTargetCheck {
 func (c *BeadsRedirectTargetCheck) Run(ctx *CheckContext) *CheckResult {
 	var broken []brokenTarget
 
-	rigDirs, err := findRigDirs(ctx.TownRoot)
+	rigDirs, err := findRigDirsForContext(ctx)
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),

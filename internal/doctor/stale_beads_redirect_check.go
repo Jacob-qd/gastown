@@ -81,7 +81,7 @@ func (c *StaleBeadsRedirectCheck) Run(ctx *CheckContext) *CheckResult {
 	var incorrectRedirects []redirectIssue
 
 	// Get list of rigs to scan
-	rigDirs, err := findRigDirs(ctx.TownRoot)
+	rigDirs, err := findRigDirsForContext(ctx)
 	if err != nil {
 		return &CheckResult{
 			Name:    c.Name(),
@@ -210,6 +210,17 @@ func findRigDirs(townRoot string) ([]string, error) {
 	}
 
 	return rigs, nil
+}
+
+func findRigDirsForContext(ctx *CheckContext) ([]string, error) {
+	if ctx.RigName != "" {
+		rigPath := filepath.Join(ctx.TownRoot, ctx.RigName)
+		if !dirExists(rigPath) {
+			return nil, nil
+		}
+		return []string{rigPath}, nil
+	}
+	return findRigDirs(ctx.TownRoot)
 }
 
 // isLikelyRig checks if a directory looks like a rig.

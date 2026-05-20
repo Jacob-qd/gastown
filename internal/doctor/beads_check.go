@@ -420,6 +420,9 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		if route.Path == "." || route.Path == "" {
 			continue
 		}
+		if ctx.RigName != "" && !routePathMatchesRig(route.Path, ctx.RigName) {
+			continue
+		}
 
 		rigPath := filepath.Join(ctx.TownRoot, route.Path)
 		rigBeadsDir := beads.ResolveBeadsDir(rigPath)
@@ -473,6 +476,11 @@ func (c *DatabasePrefixCheck) Run(ctx *CheckContext) *CheckResult {
 		FixHint:  "Run 'gt doctor --fix' to update database configs to match routes.jsonl",
 		Category: c.Category(),
 	}
+}
+
+func routePathMatchesRig(routePath, rigName string) bool {
+	routePath = strings.Trim(strings.TrimSpace(routePath), "/")
+	return routePath == rigName || strings.HasPrefix(routePath, rigName+"/")
 }
 
 // Fix updates database configs to match routes.jsonl prefixes.

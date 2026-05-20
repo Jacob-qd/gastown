@@ -629,3 +629,35 @@ func TestStaleBeadsRedirectCheck_RefineryWorkspace(t *testing.T) {
 		t.Errorf("Expected StatusWarning for refinery missing redirect, got %v: %s", result.Status, result.Message)
 	}
 }
+
+func TestStaleBeadsRedirectCheck_RigScopedScan(t *testing.T) {
+	townRoot := t.TempDir()
+	for _, rig := range []string{"myrig", "otherrig"} {
+		rigDir := filepath.Join(townRoot, rig)
+		beadsDir := filepath.Join(rigDir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(rigDir, ".git"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "redirect"), []byte("mayor/rig/.beads\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"dolt_database":"stale"}`), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	check := NewStaleBeadsRedirectCheck()
+	result := check.Run(&CheckContext{TownRoot: townRoot, RigName: "myrig"})
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning for scoped stale files, got %v: %s", result.Status, result.Message)
+	}
+	if len(result.Details) != 1 {
+		t.Fatalf("expected 1 scoped detail, got %d: %v", len(result.Details), result.Details)
+	}
+	if !strings.Contains(result.Details[0], "myrig/.beads") || strings.Contains(result.Details[0], "otherrig") {
+		t.Fatalf("unexpected scoped details: %v", result.Details)
+	}
+}
