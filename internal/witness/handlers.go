@@ -2328,6 +2328,10 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 	// unbounded polecats when a task repeatedly kills its polecat.
 	if ShouldBlockRespawn(workDir, hookBead) {
 		if router != nil {
+			diagnostics := DescribeBeadRespawnHistory(workDir, hookBead)
+			if diagnostics != "" {
+				diagnostics = "\n\n" + diagnostics
+			}
 			msg := &mail.Message{
 				From:     fmt.Sprintf("%s/witness", rigName),
 				To:       "mayor/",
@@ -2337,11 +2341,11 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 Re-dispatch blocked to prevent spawn storm.
 
 Polecat: %s/%s
-Previous Status: %s
+Previous Status: %s%s
 
 Action required: investigate why this task keeps killing its polecat,
 then either close the bead or reset the respawn counter.`,
-					hookBead, maxRespawns, rigName, polecatName, status),
+					hookBead, maxRespawns, rigName, polecatName, status, diagnostics),
 			}
 			if err := router.Send(msg); err != nil {
 				fmt.Fprintf(os.Stderr, "witness: failed to send SPAWN_BLOCKED mail for %s: %v, attempting nudge fallback\n", hookBead, err)
@@ -2358,7 +2362,8 @@ then either close the bead or reset the respawn counter.`,
 	}
 
 	// Track respawn count for audit and storm detection.
-	respawnCount := RecordBeadRespawn(workDir, hookBead)
+	respawnReason := fmt.Sprintf("witness recovered abandoned bead from %s/%s (previous status: %s)", rigName, polecatName, status)
+	respawnCount := RecordBeadRespawnWithReason(workDir, hookBead, respawnReason)
 
 	// Reset bead status to open and clear assignee
 	if err := bd.Run(workDir, "update", hookBead, "--status=open", "--assignee="); err != nil {

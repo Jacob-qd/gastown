@@ -120,14 +120,18 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	if opts.HookBead != "" && !opts.Force {
 		if witness.ShouldBlockRespawn(townRoot, opts.HookBead) {
 			maxRespawns := config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV()
+			diagnostics := witness.DescribeBeadRespawnHistory(townRoot, opts.HookBead)
+			if diagnostics != "" {
+				diagnostics = "\n\n" + diagnostics
+			}
 			return nil, fmt.Errorf("respawn limit reached for %s (%d attempts). "+
-				"This bead keeps failing — investigate before re-dispatching.\n"+
+				"This bead keeps failing — investigate before re-dispatching.%s\n\n"+
 				"Override: gt sling %s %s --force\n"+
 				"Reset:    gt sling respawn-reset %s",
-				opts.HookBead, maxRespawns,
+				opts.HookBead, maxRespawns, diagnostics,
 				opts.HookBead, rigName, opts.HookBead)
 		}
-		witness.RecordBeadRespawn(townRoot, opts.HookBead)
+		witness.RecordBeadRespawnWithReason(townRoot, opts.HookBead, "gt sling dispatch attempt (Dolt preflight passed)")
 	}
 
 	// Per-rig directory cap: prevent unbounded worktree accumulation even when
