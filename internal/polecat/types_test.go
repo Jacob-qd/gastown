@@ -144,3 +144,31 @@ func TestCleanupStatus_CanForceRemove(t *testing.T) {
 		})
 	}
 }
+
+func TestReusableIdlePolecatRequiresCleanCleanup(t *testing.T) {
+	idle := &Polecat{Name: "toast", State: StateIdle}
+	working := &Polecat{Name: "toast", State: StateWorking}
+
+	tests := []struct {
+		name          string
+		polecat       *Polecat
+		cleanupStatus CleanupStatus
+		want          bool
+	}{
+		{name: "clean idle reusable", polecat: idle, cleanupStatus: CleanupClean, want: true},
+		{name: "unpushed idle skipped", polecat: idle, cleanupStatus: CleanupUnpushed, want: false},
+		{name: "uncommitted idle skipped", polecat: idle, cleanupStatus: CleanupUncommitted, want: false},
+		{name: "stash idle skipped", polecat: idle, cleanupStatus: CleanupStash, want: false},
+		{name: "unknown idle skipped", polecat: idle, cleanupStatus: CleanupUnknown, want: false},
+		{name: "clean working skipped", polecat: working, cleanupStatus: CleanupClean, want: false},
+		{name: "nil skipped", polecat: nil, cleanupStatus: CleanupClean, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reusableIdlePolecat(tt.polecat, tt.cleanupStatus); got != tt.want {
+				t.Fatalf("reusableIdlePolecat() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

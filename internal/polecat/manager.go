@@ -2150,11 +2150,15 @@ func (m *Manager) FindIdlePolecat() (*Polecat, error) {
 		return nil, err
 	}
 	for _, p := range polecats {
-		if p.State == StateIdle {
+		if reusableIdlePolecat(p, m.getCleanupStatusFromBead(p.Name)) {
 			return p, nil
 		}
 	}
 	return nil, nil
+}
+
+func reusableIdlePolecat(p *Polecat, cleanupStatus CleanupStatus) bool {
+	return p != nil && p.State == StateIdle && cleanupStatus.IsSafe()
 }
 
 // Get returns a specific polecat by name.
