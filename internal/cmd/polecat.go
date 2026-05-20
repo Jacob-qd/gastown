@@ -1037,6 +1037,7 @@ type RecoveryStatus struct {
 	MQStatus      string                `json:"mq_status,omitempty"` // "submitted", "not_submitted", "not_required", "unknown"
 	ActiveMR      string                `json:"active_mr,omitempty"`
 	Blockers      []string              `json:"blockers,omitempty"`
+	Diagnostics   []string              `json:"diagnostics,omitempty"`
 }
 
 func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
@@ -1103,7 +1104,12 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 		// Use cleanup_status from agent bead
 		status.CleanupStatus = polecat.CleanupStatus(fields.CleanupStatus)
 		status.ActiveMR = fields.ActiveMR
-		if blocker := cleanupStatusBlocker(status.CleanupStatus); blocker != "" {
+		assignee := fmt.Sprintf("%s/polecats/%s", rigName, polecatName)
+		partialSpawn, diagnostic := partialSpawnWithoutDurableHook(bd, fields, assignee, status.Issue)
+		if diagnostic != "" {
+			status.Diagnostics = append(status.Diagnostics, diagnostic)
+		}
+		if blocker := cleanupStatusBlockerForRecovery(status.CleanupStatus, partialSpawn); blocker != "" {
 			status.Blockers = append(status.Blockers, blocker)
 		}
 		if status.CleanupStatus == "" || status.CleanupStatus == polecat.CleanupUnknown {
@@ -1163,6 +1169,9 @@ func runPolecatCheckRecovery(cmd *cobra.Command, args []string) error {
 	if status.ActiveMR != "" {
 		fmt.Printf("  Active MR:       %s\n", status.ActiveMR)
 	}
+	if len(status.Diagnostics) > 0 {
+		fmt.Printf("  Diagnostics:     %s\n", strings.Join(status.Diagnostics, "; "))
+	}
 	fmt.Println()
 
 	switch status.Verdict {
@@ -1211,6 +1220,27 @@ func cleanupStatusBlocker(status polecat.CleanupStatus) string {
 	default:
 		return fmt.Sprintf("cleanup_status=%s", status)
 	}
+}
+
+func cleanupStatusBlockerForRecovery(status polecat.CleanupStatus, partialSpawnWithoutHook bool) string {
+	if partialSpawnWithoutHook && (status == "" || status == polecat.CleanupUnknown) {
+		return ""
+	}
+	return cleanupStatusBlocker(status)
+}
+
+func partialSpawnWithoutDurableHook(bd issueShower, fields *beads.AgentFields, assignee, currentIssue string) (bool, string) {
+	if bd == nil || fields == nil || fields.AgentState != "spawning" || fields.HookBead == "" || currentIssue != "" {
+		return false, ""
+	}
+	issue, err := bd.Show(fields.HookBead)
+	if err != nil || issue == nil {
+		return false, ""
+	}
+	if (issue.Status == beads.StatusHooked && issue.Assignee == assignee) || issue.Assignee == assignee {
+		return false, ""
+	}
+	return true, fmt.Sprintf("partial_spawn_without_durable_hook agent_state=%s hook_bead=%s hook_status=%s hook_assignee=%q", fields.AgentState, fields.HookBead, issue.Status, issue.Assignee)
 }
 
 func recoveryGitStateBlocker(worktreePath string, gitState *GitState, gitErr error) string {
