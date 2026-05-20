@@ -2150,11 +2150,36 @@ func (m *Manager) FindIdlePolecat() (*Polecat, error) {
 		return nil, err
 	}
 	for _, p := range polecats {
-		if p.State == StateIdle {
+		if p.State == StateIdle && m.isReusableIdlePolecat(p.Name) {
 			return p, nil
 		}
 	}
 	return nil, nil
+}
+
+func (m *Manager) isReusableIdlePolecat(name string) bool {
+	agentID := m.agentBeadID(name)
+	_, fields, err := m.beads.GetAgentBead(agentID)
+	if err != nil || fields == nil {
+		return false
+	}
+
+	cleanupStatus := CleanupStatus(fields.CleanupStatus)
+	if fields.CleanupStatus == "" || !cleanupStatus.IsSafe() {
+		return false
+	}
+
+	if fields.ActiveMR != "" {
+		mr, err := m.beads.Show(fields.ActiveMR)
+		if err != nil || mr == nil {
+			return false
+		}
+		if !beads.IssueStatus(mr.Status).IsTerminal() {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Get returns a specific polecat by name.

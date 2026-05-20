@@ -229,4 +229,46 @@ func TestManagerTreatsLiveSessionWithoutWorkAsReviewNeeded(t *testing.T) {
 	if idle != nil {
 		t.Fatalf("FindIdlePolecat() = %q, want nil while session %s needs review", idle.Name, sessionName)
 	}
+
+	dirtyName := "aardvark"
+	if err := os.MkdirAll(filepath.Join(rigPath, "polecats", dirtyName), 0755); err != nil {
+		t.Fatalf("mkdir dirty polecat dir: %v", err)
+	}
+	if _, err := mgr.beads.CreateOrReopenAgentBead(mgr.agentBeadID(dirtyName), mgr.assigneeID(dirtyName), &beads.AgentFields{
+		AgentState:    string(beads.AgentStateIdle),
+		CleanupStatus: string(CleanupUnpushed),
+	}); err != nil {
+		t.Fatalf("create dirty idle agent bead: %v", err)
+	}
+
+	cleanName := "zebra"
+	if err := os.MkdirAll(filepath.Join(rigPath, "polecats", cleanName), 0755); err != nil {
+		t.Fatalf("mkdir clean polecat dir: %v", err)
+	}
+	if _, err := mgr.beads.CreateOrReopenAgentBead(mgr.agentBeadID(cleanName), mgr.assigneeID(cleanName), &beads.AgentFields{
+		AgentState:    string(beads.AgentStateIdle),
+		CleanupStatus: string(CleanupClean),
+	}); err != nil {
+		t.Fatalf("create clean idle agent bead: %v", err)
+	}
+
+	dirty, err := mgr.Get(dirtyName)
+	if err != nil {
+		t.Fatalf("mgr.Get(%s): %v", dirtyName, err)
+	}
+	if dirty.State != StateIdle {
+		t.Fatalf("dirty polecat state = %q, want %q", dirty.State, StateIdle)
+	}
+
+	idle, err = mgr.FindIdlePolecat()
+	if err != nil {
+		t.Fatalf("mgr.FindIdlePolecat() after dirty idle: %v", err)
+	}
+	if idle == nil || idle.Name != cleanName {
+		got := "<nil>"
+		if idle != nil {
+			got = idle.Name
+		}
+		t.Fatalf("FindIdlePolecat() = %q, want recovery-safe idle %q", got, cleanName)
+	}
 }
