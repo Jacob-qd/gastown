@@ -105,13 +105,16 @@ export default (pi) => {
   pi.on("tool_call", async (event, context) => {
     if (event.toolName === "bash" && event.input?.command) {
       const cmd = event.input.command;
-      if (
-        cmd.includes("git push") ||
-        cmd.includes("gh pr create") ||
-        cmd.includes("git checkout -b")
-      ) {
+      const operation = cmd.includes("gh pr create")
+        ? "pr-create"
+        : cmd.includes("git checkout -b") || cmd.includes("git switch -c")
+          ? "branch-create"
+          : "";
+      if (cmd.includes("git push") || operation) {
         try {
-          const result = await pi.exec("gt", ["tap", "guard", "pr-workflow"]);
+          const args = ["tap", "guard", "pr-workflow"];
+          if (operation) args.push("--operation", operation);
+          const result = await pi.exec("gt", args);
           if (result.code !== 0) {
             return { block: true, reason: result.stderr || "gt tap guard rejected this operation" };
           }

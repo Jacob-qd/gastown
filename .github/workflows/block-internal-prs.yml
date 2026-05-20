@@ -9,8 +9,9 @@ permissions: {}
 jobs:
   block-internal-prs:
     name: Block Internal PRs
-    # Only run if PR is from the same repo (not a fork)
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'renovate[bot]'
+    # Only block same-repo PRs into the default branch. Integration/review
+    # branches can use their configured landing policy.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch && github.actor != 'renovate[bot]'
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -24,19 +25,16 @@ jobs:
             const branch = context.payload.pull_request.head.ref;
 
             const body = [
-              '**Internal PRs are not allowed.**',
+              '**Same-repository PRs to the default branch are not allowed.**',
               '',
-              'Gas Town agents push directly to main. PRs are for external contributors only.',
+              'Gas Town internal work should use the repo\'s configured landing path, not same-repo PRs to the default branch.',
               '',
               'To land your changes:',
-              '```bash',
-              'git checkout main',
-              'git merge ' + branch,
-              'git push origin main',
-              'git push origin --delete ' + branch,
-              '```',
+              '- Polecats: run `gt done` to submit to the Refinery merge queue.',
+              '- Crew/maintainers: use the authorized direct-push or configured merge workflow.',
+              '- External contributors: open PRs from a fork.',
               '',
-              'See CLAUDE.md: "Crew workers push directly to main. No feature branches. NEVER create PRs."'
+              'Branch: `' + branch + '`'
             ].join('\n');
 
             await github.rest.issues.createComment({
@@ -53,4 +51,4 @@ jobs:
               state: 'closed'
             });
 
-            core.setFailed('Internal PR blocked. Push directly to main instead.');
+            core.setFailed('Same-repository PR to the default branch blocked. Use the configured Gas Town landing path instead.');
