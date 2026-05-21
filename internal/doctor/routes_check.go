@@ -1,6 +1,8 @@
 package doctor
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,6 +81,9 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		}
 	}
 
+	// Validate the raw file before LoadRoutes drops malformed/empty entries.
+	routeShapeDetails := validateRouteFileShape(routesPath)
+
 	// Load existing routes
 	routes, err := beads.LoadRoutes(beadsDir)
 	if err != nil {
@@ -97,7 +102,7 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		routeByPath[r.Path] = r.Prefix
 	}
 
-	var details []string
+	details := append([]string{}, routeShapeDetails...)
 	var missingTownRoute bool
 	var missingConvoyRoute bool
 
@@ -118,13 +123,19 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 	rigsConfig, err := config.LoadRigsConfig(rigsPath)
 	if err != nil {
 		// No rigs config - check for missing town/convoy routes and validate existing routes
-		if missingTownRoute || missingConvoyRoute {
+		if missingTownRoute || missingConvoyRoute || len(routeShapeDetails) > 0 {
+			message := "Required town routes are missing"
+			if len(routeShapeDetails) > 0 && !missingTownRoute && !missingConvoyRoute {
+				message = fmt.Sprintf("%d malformed route definition(s)", len(routeShapeDetails))
+			} else if len(routeShapeDetails) > 0 {
+				message += fmt.Sprintf(", %d malformed route definition(s)", len(routeShapeDetails))
+			}
 			return &CheckResult{
 				Name:    c.Name(),
 				Status:  StatusWarning,
-				Message: "Required town routes are missing",
+				Message: message,
 				Details: details,
-				FixHint: "Run 'gt doctor --fix' to add missing routes",
+				FixHint: "Repair routes.jsonl, then run 'gt doctor --fix' to add missing routes",
 			}
 		}
 		return c.checkRoutesValid(ctx, routes)
@@ -209,10 +220,13 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 	}
 
 	// Determine result
-	if missingTownRoute || missingConvoyRoute || len(missingRigs) > 0 || len(invalidRoutes) > 0 || len(suboptimalRoutes) > 0 {
+	if len(routeShapeDetails) > 0 || missingTownRoute || missingConvoyRoute || len(missingRigs) > 0 || len(invalidRoutes) > 0 || len(suboptimalRoutes) > 0 {
 		status := StatusWarning
 		var messageParts []string
 
+		if len(routeShapeDetails) > 0 {
+			messageParts = append(messageParts, fmt.Sprintf("%d malformed route definition(s)", len(routeShapeDetails)))
+		}
 		if missingTownRoute {
 			messageParts = append(messageParts, "town root route missing")
 		}
@@ -243,6 +257,91 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 		Status:  StatusOK,
 		Message: fmt.Sprintf("Routes configured correctly (%d routes)", len(routes)),
 	}
+}
+
+// validateRouteFileShape reports route definitions that LoadRoutes would silently
+// skip or normalize poorly. It is diagnostic-only: runtime routing semantics stay
+// unchanged and repair remains explicit.
+func validateRouteFileShape(routesPath string) []string {
+	file, err := os.Open(routesPath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	var details []string
+	prefixLines := make(map[string]int)
+	pathPrefixes := make(map[string]string)
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		var route beads.Route
+		if err := json.Unmarshal([]byte(line), &route); err != nil {
+			details = append(details, fmt.Sprintf("Route line %d is malformed JSON: %v", lineNum, err))
+			continue
+		}
+
+		if route.Prefix == "" {
+			details = append(details, fmt.Sprintf("Route line %d has empty prefix", lineNum))
+		} else {
+			if !strings.HasSuffix(route.Prefix, "-") {
+				details = append(details, fmt.Sprintf("Route line %d prefix %q must end in '-'", lineNum, route.Prefix))
+			}
+			if route.Prefix == "-" {
+				details = append(details, fmt.Sprintf("Route line %d prefix %q is not a valid routing prefix", lineNum, route.Prefix))
+			}
+			if firstLine, exists := prefixLines[route.Prefix]; exists {
+				details = append(details, fmt.Sprintf("Route line %d duplicates prefix %q first defined on line %d", lineNum, route.Prefix, firstLine))
+			} else {
+				prefixLines[route.Prefix] = lineNum
+			}
+		}
+
+		if route.Path == "" {
+			details = append(details, fmt.Sprintf("Route line %d has empty path", lineNum))
+			continue
+		}
+
+		if route.Path == "." {
+			if route.Prefix != "hq-" && route.Prefix != "hq-cv-" {
+				details = append(details, fmt.Sprintf("Route line %d maps non-town prefix %q to town root", lineNum, route.Prefix))
+			}
+			continue
+		}
+
+		if filepath.IsAbs(route.Path) {
+			details = append(details, fmt.Sprintf("Route line %d path %q must be relative to town root", lineNum, route.Path))
+			continue
+		}
+
+		cleanPath := filepath.Clean(route.Path)
+		cleanSlash := filepath.ToSlash(cleanPath)
+		if cleanSlash == ".." || strings.HasPrefix(cleanSlash, "../") {
+			details = append(details, fmt.Sprintf("Route line %d path %q escapes town root", lineNum, route.Path))
+			continue
+		}
+		if cleanPath != route.Path {
+			details = append(details, fmt.Sprintf("Route line %d path %q is not clean; use %q", lineNum, route.Path, cleanPath))
+		}
+
+		if existingPrefix, exists := pathPrefixes[cleanPath]; exists && existingPrefix != route.Prefix {
+			details = append(details, fmt.Sprintf("Route line %d path %q is also used by prefix %q", lineNum, route.Path, existingPrefix))
+		} else {
+			pathPrefixes[cleanPath] = route.Prefix
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		details = append(details, fmt.Sprintf("Failed reading routes.jsonl: %v", err))
+	}
+
+	return details
 }
 
 // checkRoutesValid checks that existing routes point to valid locations.
@@ -303,10 +402,15 @@ func isRedirectDependent(townRoot, routePath string) bool {
 // Fix attempts to add missing routing entries and rewrite suboptimal ones.
 func (c *RoutesCheck) Fix(ctx *CheckContext) error {
 	beadsDir := filepath.Join(ctx.TownRoot, ".beads")
+	routesPath := filepath.Join(beadsDir, beads.RoutesFileName)
 
 	// Ensure .beads directory exists
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return fmt.Errorf(".beads directory does not exist; run 'bd init' first")
+	}
+
+	if details := validateRouteFileShape(routesPath); len(details) > 0 {
+		return fmt.Errorf("routes.jsonl has malformed route definitions; repair manually before auto-fix: %s", strings.Join(details, "; "))
 	}
 
 	// Load existing routes
