@@ -753,6 +753,11 @@ func TestRoutesCheck_RouteShapeValidation(t *testing.T) {
 			route:   `{"prefix":"gt-","path":"."}` + "\n",
 			details: []string{"non-town prefix", "town root"},
 		},
+		{
+			name:    "town prefix away from town root",
+			route:   `{"prefix":"hq-","path":"gastown/mayor/rig"}` + "\n",
+			details: []string{"town prefix", "away from town root"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -769,7 +774,60 @@ func TestRoutesCheck_RouteShapeValidation(t *testing.T) {
 					t.Fatalf("expected detail containing %q, got %v", want, result.Details)
 				}
 			}
+			if err := check.Fix(ctx); err == nil || !strings.Contains(err.Error(), "repair manually") {
+				t.Fatalf("expected Fix to require manual repair, got %v", err)
+			}
 		})
+	}
+}
+
+func TestRoutesCheck_TownPrefixDoesNotMaskRigRoute(t *testing.T) {
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "gastown", "mayor", "rig", ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "mayor"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rigsContent := `{
+		"version": 1,
+		"rigs": {
+			"gastown": {
+				"git_url": "https://github.com/example/gastown",
+				"beads": { "prefix": "gt" }
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(tmpDir, "mayor", "rigs.json"), []byte(rigsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	routesContent := `{"prefix":"hq-","path":"gastown/mayor/rig"}
+{"prefix":"hq-cv-","path":"."}
+`
+	if err := os.WriteFile(filepath.Join(beadsDir, "routes.jsonl"), []byte(routesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := NewRoutesCheck()
+	ctx := &CheckContext{TownRoot: tmpDir}
+	result := check.Run(ctx)
+
+	if result.Status != StatusWarning {
+		t.Fatalf("expected StatusWarning, got %v: %s", result.Status, result.Message)
+	}
+	for _, want := range []string{"town prefix", "away from town root", "Rig 'gastown'"} {
+		if !detailsContain(result.Details, want) {
+			t.Fatalf("expected detail containing %q, got %v", want, result.Details)
+		}
+	}
+	if !strings.Contains(result.FixHint, "Repair routes.jsonl") {
+		t.Fatalf("expected manual repair fix hint, got %q", result.FixHint)
 	}
 }
 

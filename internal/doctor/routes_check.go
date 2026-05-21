@@ -155,9 +155,11 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 			prefix = rigEntry.BeadsConfig.Prefix + "-"
 		}
 
-		// Check if there's already a route for this rig (by path)
-		if _, hasRoute := routeByPath[expectedPath]; hasRoute {
-			// Rig already has a route with the correct path
+		// Check if there's already a route for this rig with the expected prefix
+		// and path. A town prefix pointing at a rig path must not mask a missing
+		// rig route.
+		if existingPrefix, hasRoute := routeByPath[expectedPath]; hasRoute && existingPrefix == prefix {
+			// Rig already has a route with the correct prefix and path.
 			continue
 		}
 
@@ -243,12 +245,17 @@ func (c *RoutesCheck) Run(ctx *CheckContext) *CheckResult {
 			messageParts = append(messageParts, fmt.Sprintf("%d route(s) using redirect instead of canonical path", len(suboptimalRoutes)))
 		}
 
+		fixHint := "Run 'gt doctor --fix' to fix routing issues"
+		if len(routeShapeDetails) > 0 {
+			fixHint = "Repair routes.jsonl, then run 'gt doctor --fix' to fix routing issues"
+		}
+
 		return &CheckResult{
 			Name:    c.Name(),
 			Status:  status,
 			Message: strings.Join(messageParts, ", "),
 			Details: details,
-			FixHint: "Run 'gt doctor --fix' to fix routing issues",
+			FixHint: fixHint,
 		}
 	}
 
@@ -314,6 +321,9 @@ func validateRouteFileShape(routesPath string) []string {
 				details = append(details, fmt.Sprintf("Route line %d maps non-town prefix %q to town root", lineNum, route.Prefix))
 			}
 			continue
+		}
+		if route.Prefix == "hq-" || route.Prefix == "hq-cv-" {
+			details = append(details, fmt.Sprintf("Route line %d maps town prefix %q away from town root", lineNum, route.Prefix))
 		}
 
 		if filepath.IsAbs(route.Path) {
