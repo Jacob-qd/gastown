@@ -2272,7 +2272,7 @@ func getTrackedIssues(townBeads, convoyID string) ([]trackedIssueInfo, error) {
 	}
 
 	// Fetch fresh issue details via bd show (uses prefix routing for cross-rig).
-	freshDetails := getIssueDetailsBatch(trackedIDs)
+	freshDetails := getIssueDetailsBatch(townBeads, trackedIDs)
 
 	// Build tracked dependency structs from fresh details. When fresh details
 	// are missing (cross-rig DB unreachable, missing, parked, or unroutable
@@ -2485,7 +2485,7 @@ func (d issueDetails) IsBlocked() bool {
 
 // getIssueDetailsBatch fetches details for multiple issues in a single bd show call.
 // Returns a map from issue ID to details. Missing/invalid issues are omitted from the map.
-func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
+func getIssueDetailsBatch(townRoot string, issueIDs []string) map[string]*issueDetails {
 	result := make(map[string]*issueDetails)
 	if len(issueIDs) == 0 {
 		return result
@@ -2497,62 +2497,92 @@ func getIssueDetailsBatch(issueIDs []string) map[string]*issueDetails {
 
 	// Run from town root so bd's prefix routing (routes.jsonl) can dispatch
 	// to the correct rig database for cross-rig bead lookups. (GH#2960)
-	townRoot, _ := workspace.FindFromCwdOrError()
+	if townRoot == "" {
+		townRoot, _ = workspace.FindFromCwdOrError()
+	}
 	bdc := BdCmd(args...).Stderr(io.Discard)
 	if townRoot != "" {
 		bdc.Dir(townRoot).WithRouting()
 	}
 	out, err := bdc.Output()
-	if err != nil {
-		// Batch failed - fall back to individual lookups for robustness
-		// This handles cases where some IDs are invalid/missing
-		for _, id := range issueIDs {
-			if details := getIssueDetails(id); details != nil {
-				result[id] = details
+	if err == nil {
+		var issues []issueDetailsJSON
+		if json.Unmarshal(out, &issues) == nil {
+			for _, issue := range issues {
+				result[issue.ID] = issue.toIssueDetails()
 			}
 		}
-		return result
 	}
 
-	var issues []issueDetailsJSON
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return result
-	}
-
-	for _, issue := range issues {
-		result[issue.ID] = issue.toIssueDetails()
+	// Batch routing can fail or omit cross-rig issues when routes point at a rig
+	// runtime .beads directory that bd cannot discover from cwd alone. Fall back
+	// per ID using Gas Town's route resolver and BEADS_DIR pinning. This keeps a
+	// single bad route from making completed convoys permanently "unknown".
+	for _, id := range issueIDs {
+		if _, ok := result[id]; ok {
+			continue
+		}
+		if details := getIssueDetailsFromTown(townRoot, id); details != nil {
+			result[id] = details
+		}
 	}
 
 	return result
 }
 
-// getIssueDetails fetches issue details by trying to show it via bd.
-// Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
-func getIssueDetails(issueID string) *issueDetails {
-	// Use bd show with routing - resolve from town root so bd's prefix
-	// routing (routes.jsonl) can dispatch to the correct rig database.
-	// Without Dir + StripBeadsDir, bd inherits CWD/BEADS_DIR which may
-	// point to a rig that doesn't contain the target bead. (GH#2960)
-	townRoot, _ := workspace.FindFromCwdOrError()
-	bdc := BdCmd("show", issueID, "--json").Stderr(io.Discard)
-	if townRoot != "" {
-		bdc.Dir(townRoot).WithRouting()
-	}
-	out, err := bdc.Output()
-	if err != nil {
-		return nil
-	}
-	// Handle bd exit 0 bug: empty stdout means not found
+func parseIssueDetails(out []byte) *issueDetails {
 	if len(out) == 0 {
 		return nil
 	}
-
 	var issues []issueDetailsJSON
 	if err := json.Unmarshal(out, &issues); err != nil || len(issues) == 0 {
 		return nil
 	}
-
 	return issues[0].toIssueDetails()
+}
+
+func getIssueDetailsFromBeadsDir(beadsDir, issueID string) *issueDetails {
+	if beadsDir == "" {
+		return nil
+	}
+	out, err := BdCmd("show", issueID, "--json").WithBeadsDir(beadsDir).Stderr(io.Discard).Output()
+	if err != nil {
+		return nil
+	}
+	return parseIssueDetails(out)
+}
+
+func getIssueDetailsFromTown(townRoot, issueID string) *issueDetails {
+	if townRoot == "" {
+		return nil
+	}
+
+	// First try an explicit route-to-BEADS_DIR lookup. This handles Gas Town's
+	// rig runtime layout (<town>/<rig>/.beads) even when bd's own cwd-based
+	// prefix routing cannot discover that database.
+	townBeads := beads.ResolveBeadsDir(townRoot)
+	if townBeads != "" {
+		resolvedBeads := beads.ResolveBeadsDirForID(townBeads, issueID)
+		if resolvedBeads != "" {
+			if details := getIssueDetailsFromBeadsDir(resolvedBeads, issueID); details != nil {
+				return details
+			}
+		}
+	}
+
+	// Fallback to bd's native routing from the town root.
+	out, err := BdCmd("show", issueID, "--json").Dir(townRoot).WithRouting().Stderr(io.Discard).Output()
+	if err != nil {
+		return nil
+	}
+	return parseIssueDetails(out)
+}
+
+// getIssueDetails fetches issue details by trying to show it via bd.
+// Prefer getIssueDetailsBatch for multiple issues to avoid N+1 subprocess calls.
+func getIssueDetails(issueID string) *issueDetails {
+	townRoot, _ := workspace.FindFromCwdOrError()
+	return getIssueDetailsFromTown(townRoot, issueID)
 }
 
 // workerInfo holds info about a worker assigned to an issue.

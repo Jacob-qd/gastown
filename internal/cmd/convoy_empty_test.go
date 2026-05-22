@@ -86,6 +86,49 @@ esac
 	return binDir, townRoot, closeLogPath
 }
 
+func TestGetIssueDetailsBatchFallsBackToResolvedBeadsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell mock uses /bin/sh")
+	}
+
+	binDir := t.TempDir()
+	townRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(townRoot, ".beads"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	rigBeads := filepath.Join(townRoot, "hc_lims", ".beads")
+	if err := os.MkdirAll(rigBeads, 0755); err != nil {
+		t.Fatal(err)
+	}
+	routes := `{"prefix":"hc-","path":"hc_lims"}` + "\n"
+	if err := os.WriteFile(filepath.Join(townRoot, ".beads", "routes.jsonl"), []byte(routes), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bdPath := filepath.Join(binDir, "bd")
+	script := `#!/bin/sh
+if [ "$BEADS_DIR" = "` + rigBeads + `" ] && [ "$1" = "show" ] && [ "$2" = "hc-done" ]; then
+  echo '[{"id":"hc-done","title":"Done issue","status":"closed","issue_type":"task"}]'
+  exit 0
+fi
+# Simulate native routing failure from town root.
+exit 1
+`
+	if err := os.WriteFile(bdPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	details := getIssueDetailsBatch(townRoot, []string{"hc-done"})
+	got := details["hc-done"]
+	if got == nil {
+		t.Fatal("expected fallback to resolved rig .beads to return issue details")
+	}
+	if got.Status != "closed" || got.Title != "Done issue" {
+		t.Fatalf("details = %+v, want closed Done issue", got)
+	}
+}
+
 func TestCheckSingleConvoy_EmptyConvoyDoesNotAutoClose(t *testing.T) {
 	// When getTrackedIssues returns empty (cross-rig resolution failure or truly
 	// no tracked issues), closeConvoyIfComplete must NOT auto-close. A 0/0 result
