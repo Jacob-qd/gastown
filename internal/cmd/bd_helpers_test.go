@@ -187,6 +187,9 @@ timeout /t 5 /nobreak >NUL
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("error = %v, want timeout", err)
 	}
+	if !strings.Contains(err.Error(), "bd list") {
+		t.Fatalf("error = %v, want command description bd list in timeout message", err)
+	}
 	if elapsed > 4*time.Second {
 		t.Fatalf("timeout took %v, want under 4s", elapsed)
 	}
