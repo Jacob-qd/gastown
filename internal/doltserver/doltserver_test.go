@@ -171,6 +171,51 @@ func TestReadSQLServerInfoRejectsMalformedContent(t *testing.T) {
 	}
 }
 
+func TestReadPIDFromFileAcceptsLegacyAndNonceFormats(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dolt.pid")
+
+	if err := os.WriteFile(path, []byte("12345"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if pid, err := readPIDFromFile(path); err != nil || pid != 12345 {
+		t.Fatalf("legacy pid = %d, %v; want 12345, nil", pid, err)
+	}
+
+	if err := os.WriteFile(path, []byte("67890\nnonce-value"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if pid, err := readPIDFromFile(path); err != nil || pid != 67890 {
+		t.Fatalf("nonce pid = %d, %v; want 67890, nil", pid, err)
+	}
+}
+
+func TestRepairRuntimeTrackingRecreatesMissingPIDFileAndState(t *testing.T) {
+	townRoot := t.TempDir()
+	config := DefaultConfig(townRoot)
+	config.Port = 3317
+	config.DataDir = filepath.Join(townRoot, ".dolt-data")
+	config.PidFile = filepath.Join(townRoot, "daemon", "dolt.pid")
+
+	repairRuntimeTracking(townRoot, config, 4242)
+
+	pid, err := readPIDFromFile(config.PidFile)
+	if err != nil {
+		t.Fatalf("read repaired PID file: %v", err)
+	}
+	if pid != 4242 {
+		t.Fatalf("repaired pid = %d, want 4242", pid)
+	}
+
+	state, err := LoadState(townRoot)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if !state.Running || state.PID != 4242 || state.Port != 3317 || state.DataDir != config.DataDir {
+		t.Fatalf("state = %+v, want running pid=4242 port=3317 dataDir=%s", state, config.DataDir)
+	}
+}
+
 func TestDoltProcessMatchesTownPaths(t *testing.T) {
 	expectedDir := "/town/.dolt-data"
 

@@ -578,6 +578,13 @@ func SQLServerInfoPath(townRoot string) string {
 	return sqlServerInfoPath(DefaultConfig(townRoot))
 }
 
+// PIDFile returns Gas Town's canonical Dolt server PID file path for a town.
+// Note: the PID file lives under daemon/, not .dolt-data/. Dolt's own runtime
+// metadata lives at .dolt-data/.dolt/sql-server.info.
+func PIDFile(townRoot string) string {
+	return DefaultConfig(townRoot).PidFile
+}
+
 // ReadSQLServerInfo reads Dolt's own sql-server.info metadata for a town.
 func ReadSQLServerInfo(townRoot string) (*SQLServerInfo, error) {
 	return readSQLServerInfo(DefaultConfig(townRoot))
@@ -610,6 +617,48 @@ func readSQLServerInfo(config *Config) (*SQLServerInfo, error) {
 		info.ServerID = parts[2]
 	}
 	return info, nil
+}
+
+func readPIDFromFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("empty PID file at %s", path)
+	}
+	pid, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, fmt.Errorf("invalid PID in %s: %w", path, err)
+	}
+	return pid, nil
+}
+
+func repairRuntimeTracking(townRoot string, config *Config, pid int) {
+	if pid <= 0 || config == nil || config.PidFile == "" {
+		return
+	}
+	if current, err := readPIDFromFile(config.PidFile); err != nil || current != pid {
+		_ = os.MkdirAll(filepath.Dir(config.PidFile), 0755)
+		_ = os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644)
+	}
+
+	state, _ := LoadState(townRoot)
+	if state == nil {
+		state = &State{}
+	}
+	if state.Running && state.PID == pid && state.Port == config.Port && state.DataDir == config.DataDir {
+		return
+	}
+	state.Running = true
+	state.PID = pid
+	state.Port = config.Port
+	state.DataDir = config.DataDir
+	if state.StartedAt.IsZero() {
+		state.StartedAt = time.Now()
+	}
+	_ = SaveState(townRoot, state)
 }
 
 // LoadState loads Dolt server state from disk.
@@ -689,26 +738,23 @@ func IsRunning(townRoot string) (bool, int, error) {
 	// sql-server process, but .dolt/sql-server.info is written by Dolt itself.
 	if info, err := readSQLServerInfo(config); err == nil && info.Port == config.Port && info.PID > 0 {
 		if processIsAlive(info.PID) && isDoltServerOnPort(config.Port) && doltProcessMatchesTown(townRoot, info.PID, config) {
+			repairRuntimeTracking(townRoot, config, info.PID)
 			return true, info.PID, nil
 		}
 	}
 
 	// First check PID file
-	data, err := os.ReadFile(config.PidFile)
-	if err == nil {
-		pidStr := strings.TrimSpace(string(data))
-		pid, err := strconv.Atoi(pidStr)
-		if err == nil {
-			// Check if process is alive
-			if processIsAlive(pid) {
-				// Verify it's actually serving on the expected port.
-				// More reliable than ps string matching (ZFC fix: gt-utuk).
-				if isDoltServerOnPort(config.Port) {
-					if doltProcessMatchesTown(townRoot, pid, config) {
-						return true, pid, nil
-					}
-					// Port served by a different town's Dolt — fall through to stale cleanup
+	if pid, err := readPIDFromFile(config.PidFile); err == nil {
+		// Check if process is alive
+		if processIsAlive(pid) {
+			// Verify it's actually serving on the expected port.
+			// More reliable than ps string matching (ZFC fix: gt-utuk).
+			if isDoltServerOnPort(config.Port) {
+				if doltProcessMatchesTown(townRoot, pid, config) {
+					repairRuntimeTracking(townRoot, config, pid)
+					return true, pid, nil
 				}
+				// Port served by a different town's Dolt — fall through to stale cleanup
 			}
 		}
 		// PID file is stale, clean it up
@@ -719,6 +765,7 @@ func IsRunning(townRoot string) (bool, int, error) {
 	// This catches externally-started dolt servers.
 	pid := findDoltServerOnPort(config.Port)
 	if pid > 0 && doltProcessMatchesTown(townRoot, pid, config) {
+		repairRuntimeTracking(townRoot, config, pid)
 		return true, pid, nil
 	}
 
@@ -1643,26 +1690,16 @@ func Start(townRoot string) error {
 					fmt.Fprintf(os.Stderr, "Warning: port %d still occupied after imposter kill: %v\n", config.Port, err)
 				}
 			} else {
-				// Server is legitimate — verify PID file is correct (gm-ouur fix)
-				// If PID file is stale/missing but server is on port, update it
+				// Server is legitimate — verify runtime tracking files are correct (gm-ouur fix)
+				// If PID/state files are stale/missing but server is on port, update them.
 				pidFromFile := 0
-				if data, err := os.ReadFile(config.PidFile); err == nil {
-					pidFromFile, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+				if p, err := readPIDFromFile(config.PidFile); err == nil {
+					pidFromFile = p
 				}
 				if pidFromFile != pid {
-					// PID file is stale/wrong - update it
 					fmt.Printf("Updating stale PID file (was %d, actual %d)\n", pidFromFile, pid)
-					if err := os.WriteFile(config.PidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: could not update PID file: %v\n", err)
-					}
-					// Update state too
-					state, _ := LoadState(townRoot)
-					if state != nil && state.PID != pid {
-						state.PID = pid
-						state.Running = true
-						_ = SaveState(townRoot, state)
-					}
 				}
+				repairRuntimeTracking(townRoot, config, pid)
 				return nil // already running and legitimate — idempotent success
 			}
 		}
